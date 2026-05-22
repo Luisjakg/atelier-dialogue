@@ -1,0 +1,601 @@
+<!--
+  Atelier Dialogue Composer  (dark)
+  Expands a terse shorthand into UProtoRichTextBlock markup.
+
+  Shorthand quick reference
+  -------------------------
+  plain text            -> wrapped in <t s="Default">...</>  (default style configurable)
+  [Whisper]text[/]      -> <t s="Whisper">text</>            (spans can nest)
+  [Whisper*]text[/]     -> <t s="Whisper" donthide>text</>   (trailing * = donthide)
+  [*]text[/]            -> <t s="Default" donthide>text</>
+  @WaveHand             -> <anim n="WaveHand"></>
+  @-                    -> <stopanim></>                      (stops current animation)
+  %RaiseBrow=0.8        -> <m t="RaiseBrow">0.8</>
+  [img:RowName]         -> <img id="RowName"></>
+  [w:RowName]           -> <w id="RowName"></>
+  {pc}                  -> <pc/>
+  (a thought)           -> passes through literally (engine handles PRT_THOUGHT)
+  \@ \[ \] \% \{ \\     -> escape, prints the literal character
+
+  Persistence: window.storage inside Claude, localStorage when hosted/embedded,
+  in-memory as a last resort. Safe to host (e.g. GitHub Pages) and embed in Notion.
+-->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=Spectral:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+<style>
+  :root {
+    --bg: #131419;
+    --panel: #1c1e24;
+    --panel-2: #181a1f;
+    --ink: #e8e1d1;
+    --ink-dim: #a59d8c;
+    --ink-faint: #7c7565;
+    --line: #ffffff1a;
+    --line-strong: #ffffff33;
+    --teal: #54b2ab;
+    --teal-dim: #2e6f6a;
+    --gold: #d3a44a;
+    --rust: #d4794f;
+    --ok: #6fb87f;
+    --warn: #e08a5a;
+    --field: #0f1115;
+    --code-bg: #0c0f12;
+    --shadow: 0 1px 0 #ffffff0d inset, 0 18px 40px -24px #000000cc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background:
+      radial-gradient(1100px 620px at 82% -12%, #1c2a2a 0%, transparent 60%),
+      radial-gradient(900px 540px at -8% 112%, #241f16 0%, transparent 58%),
+      var(--bg);
+    color: var(--ink);
+    font-family: "Spectral", Georgia, serif;
+    font-size: 15px;
+    line-height: 1.5;
+    padding: 28px 22px 60px;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+
+  header.masthead {
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line-strong);
+    padding-bottom: 12px; margin-bottom: 22px;
+    animation: rise .5s ease both;
+  }
+  .mark {
+    font-family: "Fraunces", serif; font-weight: 900;
+    font-size: 30px; letter-spacing: -0.02em; line-height: 1;
+  }
+  .mark .dot { color: var(--teal); }
+  .tagline { font-style: italic; color: var(--ink-faint); font-size: 14px; }
+  .badge {
+    margin-left: auto; font-family: "JetBrains Mono", monospace; font-size: 11px;
+    color: var(--teal); border: 1px solid var(--teal-dim); border-radius: 999px;
+    padding: 3px 10px; background: #54b2ab14;
+  }
+
+  .grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+  @media (min-width: 880px) { .grid.two { grid-template-columns: 1fr 1fr; } }
+
+  .card {
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+    padding: 16px 16px 18px;
+    animation: rise .5s ease both;
+  }
+  .card h2 {
+    font-family: "Fraunces", serif; font-weight: 600; font-size: 16px;
+    margin: 0 0 10px; letter-spacing: -0.01em; color: var(--ink);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card h2 .ix { font-family: "JetBrains Mono"; color: var(--gold); font-size: 13px; }
+
+  label.fld { display: block; font-size: 12px; color: var(--ink-dim); margin: 10px 0 4px; font-weight: 600; letter-spacing: .02em; }
+
+  textarea, input[type=text] {
+    width: 100%; font-family: "JetBrains Mono", monospace; font-size: 13.5px;
+    color: var(--ink); background: var(--field);
+    border: 1px solid var(--line); border-radius: 7px; padding: 10px 11px;
+    resize: vertical; line-height: 1.55;
+  }
+  textarea::placeholder, input::placeholder { color: var(--ink-faint); }
+  textarea:focus, input:focus { outline: none; border-color: var(--teal); box-shadow: 0 0 0 3px #54b2ab33; }
+  textarea#composer { min-height: 92px; }
+  textarea#batchIn { min-height: 150px; }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+  .toolbar select, .toolbar button {
+    font-family: "JetBrains Mono", monospace; font-size: 12px;
+    border: 1px solid var(--line); background: #16181d; color: var(--ink);
+    border-radius: 6px; padding: 5px 9px; cursor: pointer; transition: all .12s ease;
+  }
+  .toolbar select { padding-right: 4px; }
+  .toolbar button:hover, .toolbar select:hover { border-color: var(--teal); background: #1f2228; }
+  .toolbar button:active { transform: translateY(1px); }
+  .tb-sep { width: 1px; height: 20px; background: var(--line); margin: 0 3px; }
+
+  .out {
+    font-family: "JetBrains Mono", monospace; font-size: 13px;
+    background: var(--code-bg); color: #dfe7d8;
+    border-radius: 7px; padding: 12px 13px; white-space: pre-wrap; word-break: break-word;
+    min-height: 46px; line-height: 1.6; position: relative; border: 1px solid #00000080;
+  }
+  .out .t-tag { color: #7fd1c4; }
+  .out .a-tag { color: #e2b14e; }
+  .out .txt   { color: #f3ebd6; }
+  .out.empty { color: var(--ink-faint); font-style: italic; }
+
+  .preview {
+    font-family: "Spectral", serif; font-size: 15px; color: var(--ink-dim);
+    background: #16181d; border: 1px dashed var(--line); border-radius: 7px;
+    padding: 9px 12px; min-height: 24px; margin-top: 8px;
+  }
+  .preview .thought { font-style: italic; color: var(--ink-faint); }
+  .preview.empty { color: var(--ink-faint); font-style: italic; }
+
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+  .btn {
+    font-family: "JetBrains Mono", monospace; font-size: 12.5px; font-weight: 600;
+    border: 1px solid var(--teal); background: var(--teal); color: #0c1413;
+    border-radius: 7px; padding: 8px 14px; cursor: pointer; transition: all .12s ease;
+  }
+  .btn:hover { background: #67c2bb; }
+  .btn.ghost { background: transparent; color: var(--teal); }
+  .btn.ghost:hover { background: #54b2ab1a; }
+  .btn:active { transform: translateY(1px); }
+  .hint { font-size: 12px; color: var(--ink-faint); }
+  .ok-flash { color: var(--ok); font-weight: 600; font-size: 12px; font-family: "JetBrains Mono"; }
+
+  .warns { margin-top: 10px; font-size: 12.5px; font-family: "JetBrains Mono"; }
+  .warns .w { color: var(--warn); }
+  .warns .w b { background: #e08a5a1f; padding: 0 4px; border-radius: 3px; color: var(--warn); }
+
+  details.vocab summary {
+    cursor: pointer; font-family: "Fraunces"; font-weight: 600; font-size: 16px; color: var(--ink);
+    list-style: none; display: flex; align-items: center; gap: 8px;
+  }
+  details.vocab summary::-webkit-details-marker { display: none; }
+  details.vocab summary .chev { transition: transform .2s ease; color: var(--gold); font-family: "JetBrains Mono"; }
+  details.vocab[open] summary .chev { transform: rotate(90deg); }
+  .vocab-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 12px; }
+  @media (max-width: 620px) { .vocab-grid { grid-template-columns: 1fr; } }
+  .vocab-grid textarea { min-height: 54px; }
+
+  table.batch { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12.5px; }
+  table.batch th { text-align: left; font-family: "JetBrains Mono"; font-size: 11px; color: var(--ink-faint); border-bottom: 1px solid var(--line); padding: 6px 8px; font-weight: 600; }
+  table.batch td { vertical-align: top; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  table.batch td.key { font-family: "JetBrains Mono"; color: var(--teal); white-space: nowrap; }
+  table.batch td.exp { font-family: "JetBrains Mono"; color: #cfc8b8; word-break: break-word; }
+  table.batch td.warn { color: var(--warn); font-size: 11px; }
+
+  .cheat { font-family: "JetBrains Mono", monospace; font-size: 12.5px; line-height: 1.85; }
+  .cheat .lhs { color: var(--rust); }
+  .cheat .arr { color: var(--ink-faint); }
+  .cheat .rhs { color: var(--teal); }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .card:nth-child(2) { animation-delay: .05s; }
+  .card:nth-child(3) { animation-delay: .1s; }
+  footer.note { margin-top: 26px; font-size: 12px; color: var(--ink-faint); font-style: italic; text-align: center; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <span class="mark">Atelier<span class="dot">&middot;</span>Dialogue</span>
+    <span class="tagline">type the words, not the tags</span>
+    <span class="badge" id="storeBadge">persist: &hellip;</span>
+  </header>
+
+  <!-- VOCAB -->
+  <div class="card">
+    <details class="vocab" id="vocabBox">
+      <summary><span class="chev">&#9656;</span> Vocabulary <span style="font-size:12px;color:var(--ink-dim);font-weight:400;font-family:Spectral">&mdash; names from your data tables (powers the toolbar &amp; typo warnings)</span></summary>
+      <div class="vocab-grid">
+        <div>
+          <label class="fld">Text styles &mdash; ProtoTextStyleSet rows</label>
+          <textarea id="vStyles" placeholder="Default, Whisper, Shout, Spell"></textarea>
+        </div>
+        <div>
+          <label class="fld">Default style (auto-wraps plain text)</label>
+          <input type="text" id="vDefault" placeholder="Default" />
+          <label class="fld">Anim names &mdash; &lt;anim&gt;</label>
+          <textarea id="vAnims" placeholder="WaveHand, HeadPop, Nod"></textarea>
+        </div>
+        <div>
+          <label class="fld">Morph targets &mdash; &lt;m&gt;</label>
+          <textarea id="vMorphs" placeholder="RaiseBrow, Squint, Smile"></textarea>
+        </div>
+        <div>
+          <label class="fld">Image rows &mdash; ImageSet</label>
+          <textarea id="vImages" placeholder="ButtonA, IconStar"></textarea>
+          <label class="fld">Widget rows &mdash; WidgetSet</label>
+          <textarea id="vWidgets" placeholder="ChoiceBox"></textarea>
+        </div>
+      </div>
+      <div class="row"><span class="hint">Separate names with commas, spaces, or new lines. Saved automatically.</span></div>
+    </details>
+  </div>
+
+  <!-- COMPOSER -->
+  <div class="card">
+    <h2><span class="ix">01</span> Composer</h2>
+    <div class="toolbar" id="toolbar">
+      <select id="tbStyle" title="Wrap selection in a style"><option value="">style &#9662;</option></select>
+      <button data-act="donthide" title="Wrap selection, keep visible before LBL">style*</button>
+      <span class="tb-sep"></span>
+      <select id="tbAnim" title="Insert anim trigger"><option value="">@anim &#9662;</option></select>
+      <button data-act="stopanim" title="Stop the current animation">@-stop</button>
+      <select id="tbMorph" title="Insert morph trigger"><option value="">%morph &#9662;</option></select>
+      <span class="tb-sep"></span>
+      <select id="tbImg" title="Insert inline image"><option value="">[img] &#9662;</option></select>
+      <select id="tbWidget" title="Insert inline widget"><option value="">[w] &#9662;</option></select>
+      <button data-act="pc" title="Player-count substitution">{pc}</button>
+      <button data-act="thought" title="Wrap selection as a thought">( )</button>
+    </div>
+    <textarea id="composer" placeholder="Hello.&#10;&#10;Try:  The cauldron hissed. @RaiseBrow %Squint=0.6 [Whisper]Careful now[/]&#10;...&#10;He stepped back. (That can't be right.)"></textarea>
+
+    <label class="fld">Expanded markup</label>
+    <div class="out empty" id="output">&mdash; starts here &mdash;</div>
+
+    <label class="fld">Player sees</label>
+    <div class="preview empty" id="preview">&mdash; starts here &mdash;</div>
+
+    <div class="warns" id="warns"></div>
+
+    <div class="row">
+      <button class="btn" id="copyBtn">Copy markup</button>
+      <button class="btn ghost" id="clearBtn">Clear</button>
+      <span class="ok-flash" id="copyMsg"></span>
+    </div>
+  </div>
+
+  <div class="grid two">
+    <!-- BATCH -->
+    <div class="card">
+      <h2><span class="ix">02</span> Batch &amp; DataTable export</h2>
+      <p class="hint" style="margin:0 0 8px">One line per row. Prefix an optional row key with <b style="font-family:JetBrains Mono;color:var(--teal)"> :: </b> &nbsp;e.g. <span style="font-family:JetBrains Mono;color:var(--teal)">Greet_01 :: Hello [Shout]there[/]!</span></p>
+      <textarea id="batchIn" placeholder="Intro_01 :: Welcome to the atelier.&#10;Intro_02 :: [Whisper]Mind the spilled ink.[/]&#10;Greet :: Hello@WaveHand, traveller."></textarea>
+      <div class="row">
+        <button class="btn" id="batchCopy">Copy all markup</button>
+        <button class="btn ghost" id="batchCsv">Export CSV</button>
+        <span class="ok-flash" id="batchMsg"></span>
+      </div>
+      <table class="batch" id="batchTable"></table>
+    </div>
+
+    <!-- CHEATSHEET -->
+    <div class="card">
+      <h2><span class="ix">03</span> Shorthand</h2>
+      <div class="cheat">
+        <div><span class="lhs">plain text</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;t s="Default"&gt;&hellip;&lt;/&gt;</span></div>
+        <div><span class="lhs">[Whisper]hi[/]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;t s="Whisper"&gt;hi&lt;/&gt;</span></div>
+        <div><span class="lhs">[Spell*]hi[/]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;t s="Spell" donthide&gt;hi&lt;/&gt;</span></div>
+        <div><span class="lhs">@WaveHand</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand"&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">@-</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;stopanim&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">%RaiseBrow=0.8</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;m t="RaiseBrow"&gt;0.8&lt;/&gt;</span></div>
+        <div><span class="lhs">[img:Star]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;img id="Star"&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">[w:Choice]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;w id="Choice"&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">{pc}</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;pc/&gt;</span></div>
+        <div><span class="lhs">(a thought)</span> <span class="arr">&rarr;</span> <span class="rhs">passes through as-is</span></div>
+        <div><span class="lhs">\@ \[ \% \{ \\</span> <span class="arr">&rarr;</span> <span class="rhs">escape &rarr; literal char</span></div>
+      </div>
+      <p class="hint" style="margin-top:12px">Spans nest: <span style="font-family:JetBrains Mono">[A]x[B]y[/]z[/]</span> closes inner first. Event tags sit between text runs, matching the doc's examples.</p>
+    </div>
+  </div>
+
+  <footer class="note">Output uses the short tag forms (&lt;t&gt;, &lt;anim&gt;, &lt;m&gt;, &lt;img&gt;, &lt;w&gt;) &mdash; identical in behaviour to the long forms in your spec.</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---------- persistence ----------
+  // Prefers Claude's window.storage; falls back to localStorage when hosted/embedded
+  // (e.g. GitHub Pages inside a Notion embed); finally to in-memory for this session.
+  var STORE = (typeof window !== "undefined" && window.storage) ? window.storage : null;
+  var LS = null;
+  if (!STORE) {
+    try { var probe = "__atelier_probe"; window.localStorage.setItem(probe, "1"); window.localStorage.removeItem(probe); LS = window.localStorage; }
+    catch (e) { LS = null; }
+  }
+  var mem = {};
+  document.getElementById("storeBadge").textContent =
+    "persist: " + (STORE ? "on" : (LS ? "browser" : "session-only"));
+  async function save(key, val) {
+    try {
+      if (STORE) { await STORE.set(key, JSON.stringify(val), false); return; }
+      if (LS) { LS.setItem("atelier_" + key, JSON.stringify(val)); return; }
+    } catch (e) { /* fall through to memory */ }
+    mem[key] = val;
+  }
+  async function load(key) {
+    try {
+      if (STORE) { var r = await STORE.get(key, false); return r ? JSON.parse(r.value) : null; }
+      if (LS) { var v = LS.getItem("atelier_" + key); return v ? JSON.parse(v) : null; }
+    } catch (e) { /* missing key / blocked storage — treat as null */ }
+    return (key in mem) ? mem[key] : null;
+  }
+
+  // ---------- vocab ----------
+  var V = { styles: [], anims: [], morphs: [], images: [], widgets: [], defaultStyle: "Default" };
+  function splitNames(s) {
+    return (s || "").split(/[\s,]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+  }
+  var el = function (id) { return document.getElementById(id); };
+
+  function readVocabFromUI() {
+    V.styles = splitNames(el("vStyles").value);
+    V.anims = splitNames(el("vAnims").value);
+    V.morphs = splitNames(el("vMorphs").value);
+    V.images = splitNames(el("vImages").value);
+    V.widgets = splitNames(el("vWidgets").value);
+    V.defaultStyle = (el("vDefault").value || "Default").trim() || "Default";
+    if (V.styles.indexOf(V.defaultStyle) === -1) V.styles.unshift(V.defaultStyle);
+  }
+  function fillSelect(sel, label, items, makeVal) {
+    sel.innerHTML = "";
+    var o0 = document.createElement("option"); o0.value = ""; o0.textContent = label; sel.appendChild(o0);
+    items.forEach(function (n) {
+      var o = document.createElement("option"); o.value = makeVal(n); o.textContent = n; sel.appendChild(o);
+    });
+    sel.value = "";
+  }
+  function refreshToolbar() {
+    fillSelect(el("tbStyle"), "style \u25BE", V.styles, function (n) { return "S:" + n; });
+    fillSelect(el("tbAnim"), "@anim \u25BE", V.anims, function (n) { return n; });
+    fillSelect(el("tbMorph"), "%morph \u25BE", V.morphs, function (n) { return n; });
+    fillSelect(el("tbImg"), "[img] \u25BE", V.images, function (n) { return n; });
+    fillSelect(el("tbWidget"), "[w] \u25BE", V.widgets, function (n) { return n; });
+  }
+
+  // ---------- the expander ----------
+  function expand(src) {
+    var unknown = { styles: {}, anims: {}, morphs: {}, images: {}, widgets: {} };
+    function mark(set, name) { set[name] = true; }
+    var out = "", buf = "";
+    var stack = [{ name: V.defaultStyle, dh: false }];
+    function flush() {
+      if (!buf.length) return;
+      var top = stack[stack.length - 1];
+      out += '<t s="' + top.name + '"' + (top.dh ? " donthide" : "") + ">" + buf + "</>";
+      buf = "";
+    }
+    var i = 0, n = src.length;
+    while (i < n) {
+      var c = src[i];
+      if (c === "\\" && i + 1 < n) { buf += src[i + 1]; i += 2; continue; }
+
+      if (c === "[") {
+        var end = src.indexOf("]", i + 1);
+        if (end === -1) { buf += c; i++; continue; }
+        var inner = src.slice(i + 1, end);
+        if (inner === "/") { flush(); if (stack.length > 1) stack.pop(); i = end + 1; continue; }
+        var asset = inner.match(/^(img|image|i|w|widget)\s*:\s*(.+)$/i);
+        if (asset) {
+          flush();
+          var kind = asset[1].toLowerCase(), id = asset[2].trim();
+          if (kind === "w" || kind === "widget") { out += '<w id="' + id + '"></>'; if (V.widgets.indexOf(id) === -1) mark(unknown.widgets, id); }
+          else { out += '<img id="' + id + '"></>'; if (V.images.indexOf(id) === -1) mark(unknown.images, id); }
+          i = end + 1; continue;
+        }
+        flush();
+        var name = inner.trim(), dh = false;
+        if (name.slice(-1) === "*") { dh = true; name = name.slice(0, -1).trim(); }
+        if (name === "") name = V.defaultStyle;
+        if (V.styles.indexOf(name) === -1) mark(unknown.styles, name);
+        stack.push({ name: name, dh: dh });
+        i = end + 1; continue;
+      }
+
+      if (c === "@") {
+        if (src[i + 1] === "-") {
+          flush();
+          out += "<stopanim></>";
+          // consume an optional trailing identifier and ignore it (names unused)
+          var rest = src.slice(i + 2).match(/^[A-Za-z0-9_]+/);
+          i += 2 + (rest ? rest[0].length : 0);
+          continue;
+        }
+        var am = src.slice(i + 1).match(/^[A-Za-z0-9_]+/);
+        if (am) { flush(); out += '<anim n="' + am[0] + '"></>'; if (V.anims.indexOf(am[0]) === -1) mark(unknown.anims, am[0]); i += 1 + am[0].length; continue; }
+        buf += c; i++; continue;
+      }
+
+      if (c === "%") {
+        var mm = src.slice(i + 1).match(/^([A-Za-z0-9_]+)\s*=\s*(-?[0-9]+(?:[.,][0-9]+)?)/);
+        if (mm) { flush(); out += '<m t="' + mm[1] + '">' + mm[2] + "</>"; if (V.morphs.indexOf(mm[1]) === -1) mark(unknown.morphs, mm[1]); i += 1 + mm[0].length; continue; }
+        buf += c; i++; continue;
+      }
+
+      if (c === "{") {
+        var ce = src.indexOf("}", i + 1);
+        if (ce !== -1 && src.slice(i + 1, ce).trim().toLowerCase() === "pc") { flush(); out += "<pc/>"; i = ce + 1; continue; }
+        buf += c; i++; continue;
+      }
+
+      buf += c; i++;
+    }
+    flush();
+    var list = [];
+    function push(label, set) { var k = Object.keys(set); if (k.length) list.push(label + ": " + k.join(", ")); }
+    push("style", unknown.styles); push("anim", unknown.anims); push("morph", unknown.morphs);
+    push("image", unknown.images); push("widget", unknown.widgets);
+    return { out: out, unknown: list };
+  }
+
+  // strip tags for the "player sees" preview
+  function plainPreview(markup) {
+    return markup.replace(/<[^>]*>/g, "");
+  }
+  function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+  // colourise the expanded markup for display
+  function colourise(markup) {
+    var safe = esc(markup);
+    safe = safe.replace(/(&lt;\/?(?:t|text)\b[^&]*?&gt;)/g, '<span class="t-tag">$1</span>');
+    safe = safe.replace(/(&lt;(?:anim|stopanim|m|img|image|i|w|widget|pc)\b[^&]*?\/?&gt;)/g, '<span class="a-tag">$1</span>');
+    return safe;
+  }
+
+  // ---------- composer wiring ----------
+  var composer = el("composer"), output = el("output"), preview = el("preview"), warns = el("warns");
+  function renderComposer() {
+    var src = composer.value;
+    if (!src.trim()) {
+      output.className = "out empty"; output.textContent = "\u2014 starts here \u2014";
+      preview.className = "preview empty"; preview.textContent = "\u2014 starts here \u2014";
+      warns.innerHTML = ""; return;
+    }
+    var r = expand(src);
+    output.className = "out"; output.innerHTML = colourise(r.out);
+    var pv = esc(plainPreview(r.out)).replace(/(\([^()]*\))/g, '<span class="thought">$1</span>');
+    preview.className = "preview"; preview.innerHTML = pv || "\u2014";
+    warns.innerHTML = r.unknown.length
+      ? '<span class="w">\u26A0 not in vocabulary (would resolve to NAME_None): ' + r.unknown.map(function (u) { return "<b>" + esc(u) + "</b>"; }).join(" \u00B7 ") + "</span>"
+      : "";
+    save("composer", src);
+  }
+
+  // selection-aware insert helpers
+  function wrapSelection(before, after, fallbackCursorOffset) {
+    composer.focus();
+    var s = composer.selectionStart, e = composer.selectionEnd, v = composer.value;
+    var sel = v.slice(s, e);
+    var ins = before + sel + after;
+    composer.value = v.slice(0, s) + ins + v.slice(e);
+    var caret = sel ? (s + ins.length) : (s + before.length + (fallbackCursorOffset || 0));
+    composer.selectionStart = composer.selectionEnd = caret;
+    renderComposer();
+  }
+  function insertAtCursor(text) {
+    composer.focus();
+    var s = composer.selectionStart, v = composer.value;
+    composer.value = v.slice(0, s) + text + v.slice(composer.selectionEnd);
+    composer.selectionStart = composer.selectionEnd = s + text.length;
+    renderComposer();
+  }
+
+  composer.addEventListener("input", renderComposer);
+
+  el("tbStyle").addEventListener("change", function () {
+    if (!this.value) return; var name = this.value.slice(2);
+    wrapSelection("[" + name + "]", "[/]"); this.value = "";
+  });
+  el("toolbar").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-act]"); if (!b) return;
+    var act = b.getAttribute("data-act");
+    if (act === "donthide") { var nm = V.styles[0] || "Default"; wrapSelection("[" + nm + "*]", "[/]"); }
+    else if (act === "stopanim") { insertAtCursor("@-"); }
+    else if (act === "pc") { insertAtCursor("{pc}"); }
+    else if (act === "thought") { wrapSelection("(", ")"); }
+  });
+  el("tbAnim").addEventListener("change", function () { if (this.value) insertAtCursor("@" + this.value); this.value = ""; });
+  el("tbMorph").addEventListener("change", function () { if (this.value) insertAtCursor("%" + this.value + "="); this.value = ""; });
+  el("tbImg").addEventListener("change", function () { if (this.value) insertAtCursor("[img:" + this.value + "]"); this.value = ""; });
+  el("tbWidget").addEventListener("change", function () { if (this.value) insertAtCursor("[w:" + this.value + "]"); this.value = ""; });
+
+  function flashMsg(node, txt) { node.textContent = txt; setTimeout(function () { node.textContent = ""; }, 1600); }
+  // clipboard API is often blocked in cross-origin (Notion) iframes; fall back to execCommand
+  function copyText(text, msgNode, okLabel) {
+    function fallback() {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.top = "0"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        var ok = document.execCommand("copy"); document.body.removeChild(ta);
+        flashMsg(msgNode, ok ? okLabel : "select & copy manually");
+      } catch (e) { flashMsg(msgNode, "select & copy manually"); }
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { flashMsg(msgNode, okLabel); }, fallback);
+    } else { fallback(); }
+  }
+  el("copyBtn").addEventListener("click", function () {
+    copyText(expand(composer.value).out, el("copyMsg"), "\u2713 copied");
+  });
+  el("clearBtn").addEventListener("click", function () { composer.value = ""; renderComposer(); });
+
+  // ---------- batch ----------
+  var batchIn = el("batchIn"), batchTable = el("batchTable");
+  function parseBatch() {
+    var lines = batchIn.value.split(/\r?\n/);
+    var rows = [];
+    var auto = 1;
+    lines.forEach(function (raw) {
+      if (!raw.trim()) return;
+      var key, body, ix = raw.indexOf("::");
+      if (ix !== -1) { key = raw.slice(0, ix).trim(); body = raw.slice(ix + 2).trim(); }
+      else { key = "LINE_" + String(auto++).padStart(4, "0"); body = raw; }
+      var r = expand(body);
+      rows.push({ key: key, exp: r.out, warn: r.unknown });
+    });
+    return rows;
+  }
+  function renderBatch() {
+    var rows = parseBatch();
+    if (!rows.length) { batchTable.innerHTML = ""; save("batch", batchIn.value); return; }
+    var html = "<tr><th>Row</th><th>Expanded markup</th></tr>";
+    rows.forEach(function (r) {
+      html += "<tr><td class='key'>" + esc(r.key) + "</td><td class='exp'>" + esc(r.exp) +
+        (r.warn.length ? "<div class='warn'>\u26A0 " + esc(r.warn.join(" \u00B7 ")) + "</div>" : "") + "</td></tr>";
+    });
+    batchTable.innerHTML = html;
+    save("batch", batchIn.value);
+  }
+  batchIn.addEventListener("input", renderBatch);
+  el("batchCopy").addEventListener("click", function () {
+    var rows = parseBatch();
+    var txt = rows.map(function (r) { return r.exp; }).join("\n");
+    copyText(txt, el("batchMsg"), "\u2713 " + rows.length + " lines copied");
+  });
+  function csvCell(s) { return '"' + String(s).replace(/"/g, '""') + '"'; }
+  el("batchCsv").addEventListener("click", function () {
+    var rows = parseBatch();
+    var csv = "Name,Text\r\n" + rows.map(function (r) { return csvCell(r.key) + "," + csvCell(r.exp); }).join("\r\n") + "\r\n";
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "atelier-dialogue.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    flashMsg(el("batchMsg"), "\u2713 CSV exported");
+  });
+
+  // ---------- vocab wiring + boot ----------
+  ["vStyles", "vAnims", "vMorphs", "vImages", "vWidgets", "vDefault"].forEach(function (id) {
+    el(id).addEventListener("input", function () {
+      readVocabFromUI(); refreshToolbar(); renderComposer(); renderBatch();
+      save("vocab", {
+        styles: el("vStyles").value, anims: el("vAnims").value, morphs: el("vMorphs").value,
+        images: el("vImages").value, widgets: el("vWidgets").value, def: el("vDefault").value
+      });
+    });
+  });
+
+  (async function boot() {
+    var vsaved = await load("vocab");
+    if (vsaved) {
+      el("vStyles").value = vsaved.styles || ""; el("vAnims").value = vsaved.anims || "";
+      el("vMorphs").value = vsaved.morphs || ""; el("vImages").value = vsaved.images || "";
+      el("vWidgets").value = vsaved.widgets || ""; el("vDefault").value = vsaved.def || "Default";
+    } else {
+      el("vStyles").value = "Default, Whisper, Shout, Spell";
+      el("vAnims").value = "WaveHand, HeadPop, Nod";
+      el("vMorphs").value = "RaiseBrow, Squint, Smile";
+      el("vDefault").value = "Default";
+      el("vocabBox").open = true;
+    }
+    var csaved = await load("composer"); if (csaved) composer.value = csaved;
+    var bsaved = await load("batch"); if (bsaved) batchIn.value = bsaved;
+
+    readVocabFromUI(); refreshToolbar(); renderComposer(); renderBatch();
+  })();
+})();
+</script>
