@@ -9,6 +9,7 @@
   [Whisper*]text[/]     -> <t s="Whisper" donthide>text</>   (trailing * = donthide)
   [*]text[/]            -> <t s="Default" donthide>text</>
   @WaveHand             -> <anim n="WaveHand"></>
+  @WaveHand!            -> <anim n="WaveHand" ovlook="true"></>  (trailing ! = override look-at)
   @-                    -> <stopanim></>                      (stops current animation)
   %RaiseBrow=0.8        -> <m t="RaiseBrow">0.8</>
   [img:RowName]         -> <img id="RowName"></>
@@ -327,6 +328,7 @@
         <div><span class="lhs">[Whisper]hi[/]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;t s="Whisper"&gt;hi&lt;/&gt;</span></div>
         <div><span class="lhs">[Spell*]hi[/]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;t s="Spell" donthide&gt;hi&lt;/&gt;</span></div>
         <div><span class="lhs">@WaveHand</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand"&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">@WaveHand!</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" ovlook="true"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">@-</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;stopanim&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">%RaiseBrow=0.8</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;m t="RaiseBrow"&gt;0.8&lt;/&gt;</span></div>
         <div><span class="lhs">[img:Star]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;img id="Star"&gt;&lt;/&gt;</span></div>
@@ -453,8 +455,14 @@
           i += 2 + (rest ? rest[0].length : 0);
           continue;
         }
-        var am = src.slice(i + 1).match(/^[A-Za-z0-9_]+/);
-        if (am) { flush(); out += '<anim n="' + am[0] + '"></>'; if (V.anims.indexOf(am[0]) === -1) mark(unknown.anims, am[0]); i += 1 + am[0].length; continue; }
+        var am = src.slice(i + 1).match(/^([A-Za-z0-9_]+)(!?)/);
+        if (am) {
+          flush();
+          var animName = am[1], ovr = am[2] === "!";
+          out += '<anim n="' + animName + '"' + (ovr ? ' ovlook="true"' : '') + '></>';
+          if (V.anims.indexOf(animName) === -1) mark(unknown.anims, animName);
+          i += 1 + am[0].length; continue;
+        }
         buf += c; i++; continue;
       }
 
