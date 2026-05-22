@@ -281,6 +281,7 @@
       <button data-act="donthide" title="Wrap selection, keep visible before LBL">style*</button>
       <span class="tb-sep"></span>
       <select id="tbAnim" title="Insert anim trigger"><option value="">@anim &#9662;</option></select>
+      <select id="tbAnimOv" title="Insert anim trigger with ovlook=&quot;true&quot; (override look-at)"><option value="">@anim! &#9662;</option></select>
       <button data-act="stopanim" title="Stop the current animation">@-stop</button>
       <select id="tbMorph" title="Insert morph trigger"><option value="">%morph &#9662;</option></select>
       <span class="tb-sep"></span>
@@ -402,6 +403,7 @@
   function refreshToolbar() {
     fillSelect(el("tbStyle"), "style \u25BE", V.styles, function (n) { return "S:" + n; });
     fillSelect(el("tbAnim"), "@anim \u25BE", V.anims, function (n) { return n; });
+    fillSelect(el("tbAnimOv"), "@anim! \u25BE", V.anims, function (n) { return n; });
     fillSelect(el("tbMorph"), "%morph \u25BE", V.morphs, function (n) { return n; });
     fillSelect(el("tbImg"), "[img] \u25BE", V.images, function (n) { return n; });
     fillSelect(el("tbWidget"), "[w] \u25BE", V.widgets, function (n) { return n; });
@@ -555,6 +557,7 @@
     else if (act === "thought") { wrapSelection("(", ")"); }
   });
   el("tbAnim").addEventListener("change", function () { if (this.value) insertAtCursor("@" + this.value); this.value = ""; });
+  el("tbAnimOv").addEventListener("change", function () { if (this.value) insertAtCursor("@" + this.value + "!"); this.value = ""; });
   el("tbMorph").addEventListener("change", function () { if (this.value) insertAtCursor("%" + this.value + "="); this.value = ""; });
   el("tbImg").addEventListener("change", function () { if (this.value) insertAtCursor("[img:" + this.value + "]"); this.value = ""; });
   el("tbWidget").addEventListener("change", function () { if (this.value) insertAtCursor("[w:" + this.value + "]"); this.value = ""; });
