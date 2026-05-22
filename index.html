@@ -338,6 +338,7 @@
 
     <div class="row">
       <button class="btn" id="copyBtn">Copy markup</button>
+      <button class="btn ghost" id="revBtn" title="Parse markup pasted in the composer and replace it with the shorthand form">From markup</button>
       <button class="btn ghost" id="clearBtn">Clear</button>
       <span class="ok-flash" id="copyMsg"></span>
     </div>
@@ -531,6 +532,71 @@
   }
   function esc(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 
+  // ---------- inverse: markup -> shorthand ----------
+  // Re-escape characters that the shorthand parser would otherwise interpret.
+  function escapeForShorthand(text) {
+    var out = "";
+    for (var k = 0; k < text.length; k++) {
+      var ch = text[k];
+      if (ch === "\\") out += "\\\\";
+      else if (ch === "[") out += "\\[";
+      else if (ch === "@" && /[A-Za-z0-9_\-]/.test(text[k + 1] || "")) out += "\\@";
+      else if (ch === "{" && text.slice(k, k + 4).toLowerCase() === "{pc}") out += "\\{";
+      else out += ch;
+    }
+    return out;
+  }
+  function shorthandify(markup) {
+    if (!/<[a-zA-Z\/]/.test(markup)) return null; // nothing tag-like, not markup
+    var out = "", i = 0, n = markup.length;
+    while (i < n) {
+      var c = markup[i];
+      if (c !== "<") { out += c; i++; continue; }
+      if (markup.slice(i, i + 3) === "</>") { i += 3; continue; } // stray close
+      var end = markup.indexOf(">", i);
+      if (end === -1) { out += c; i++; continue; }
+      var body = markup.slice(i + 1, end);
+      var selfClose = body.slice(-1) === "/";
+      if (selfClose) body = body.slice(0, -1).trim();
+      i = end + 1;
+      var nm = body.match(/^([a-zA-Z]+)/);
+      if (!nm) { out += "<" + body + (selfClose ? "/" : "") + ">"; continue; }
+      var name = nm[1].toLowerCase();
+      var rest = body.slice(nm[0].length);
+      var attrs = {}, flags = [];
+      var ar = /([a-zA-Z]+)\s*=\s*"([^"]*)"|([a-zA-Z]+)/g, m;
+      while ((m = ar.exec(rest)) !== null) {
+        if (m[1] !== undefined) attrs[m[1].toLowerCase()] = m[2];
+        else if (m[3] !== undefined) flags.push(m[3].toLowerCase());
+      }
+      if (name === "t" || name === "text") {
+        var cIx = markup.indexOf("</>", i);
+        var inner = cIx >= 0 ? markup.slice(i, cIx) : markup.slice(i);
+        i = cIx >= 0 ? cIx + 3 : n;
+        var nested = shorthandify(inner);
+        var innerText = (nested != null) ? nested : escapeForShorthand(inner);
+        var style = attrs.s || V.defaultStyle;
+        var dh = flags.indexOf("donthide") !== -1;
+        if (style === V.defaultStyle && !dh) out += innerText;
+        else out += "[" + style + (dh ? "*" : "") + "]" + innerText + "[/]";
+      } else if (name === "anim") {
+        out += "@" + (attrs.n || "");
+        if (attrs.ovlook === "true" || attrs.ovlook === "1") out += "!";
+      } else if (name === "stopanim") {
+        out += "@-";
+      } else if (name === "img" || name === "image" || name === "i") {
+        out += "[img:" + (attrs.id || "") + "]";
+      } else if (name === "w" || name === "widget") {
+        out += "[w:" + (attrs.id || "") + "]";
+      } else if (name === "pc") {
+        out += "{pc}";
+      } else {
+        out += "<" + body + (selfClose ? "/" : "") + ">";
+      }
+    }
+    return out;
+  }
+
   // colourise the expanded markup for display
   function colourise(markup) {
     var safe = esc(markup);
@@ -605,6 +671,12 @@
   }
   el("copyBtn").addEventListener("click", function () {
     copyText(expand(composer.value).out, el("copyMsg"), "\u2713 copied");
+  });
+  el("revBtn").addEventListener("click", function () {
+    var sh = shorthandify(composer.value);
+    if (sh == null) { flashMsg(el("copyMsg"), "no markup detected"); return; }
+    composer.value = sh; renderComposer();
+    flashMsg(el("copyMsg"), "\u2713 converted to shorthand");
   });
   el("clearBtn").addEventListener("click", function () { composer.value = ""; renderComposer(); });
 
