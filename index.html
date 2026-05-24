@@ -10,6 +10,8 @@
   [*]text[/]            -> <t s="Default" donthide>text</>
   @WaveHand             -> <anim n="WaveHand"></>
   @WaveHand!            -> <anim n="WaveHand" ovlook="true"></>  (trailing ! = override look-at)
+  @WaveHand:0.25        -> <anim n="WaveHand" blendtime="0.25"></>  (trailing :NUM = blend time)
+  @WaveHand!:0.25       -> <anim n="WaveHand" ovlook="true" blendtime="0.25"></>
   @-                    -> <stopanim></>                      (stops current animation)
   [img:RowName]         -> <img id="RowName"></>
   [w:RowName]           -> <w id="RowName"></>
@@ -238,11 +240,21 @@
     color: var(--ink-dim); cursor: pointer; user-select: none;
     padding: 2px 6px; border-radius: 4px;
   }
-  .tb-mod input {
+  .tb-mod input[type="checkbox"] {
     accent-color: var(--teal);
     width: 12px; height: 12px; margin: 0; cursor: pointer;
   }
+  .tb-mod input[type="number"] {
+    width: 52px; margin: 0 0 0 2px;
+    font-family: "JetBrains Mono", monospace; font-size: 11px;
+    background: var(--code-bg); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 3px;
+    padding: 1px 4px;
+  }
+  .tb-mod input[type="number"]:disabled { opacity: 0.4; cursor: not-allowed; }
+  .tb-mod + .tb-mod { margin-left: 8px; }
   .tb-mod:hover { color: var(--ink); }
+  .tb-row:has(.tb-mod input[type="checkbox"]:checked) .tb-mod input[type="checkbox"] ~ * { color: var(--teal); }
   .tb-row:has(.tb-mod input:checked) .tb-mod { color: var(--teal); background: #54b2ab14; }
 
   .out {
@@ -364,6 +376,10 @@
         <label class="tb-mod" title="Append ovlook=&quot;true&quot; (override look-at)">
           <input type="checkbox" id="tbOvlook" /><span>override look-at</span>
         </label>
+        <label class="tb-mod" title="Append blendtime=&quot;X&quot; (seconds to blend into the anim)">
+          <input type="checkbox" id="tbBlendTimeOn" /><span>blend time</span>
+          <input type="number" id="tbBlendTime" value="0.25" min="0" step="0.05" disabled />
+        </label>
       </div>
       <div class="tb-row" id="rowImages">
         <span class="tb-label">images</span>
@@ -423,6 +439,7 @@
         <div><span class="lhs">[Spell*]hi[/]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;t s="Spell" donthide&gt;hi&lt;/&gt;</span></div>
         <div><span class="lhs">@WaveHand</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">@WaveHand!</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" ovlook="true"&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">@WaveHand:0.25</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" blendtime="0.25"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">@-</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;stopanim&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">[img:Star]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;img id="Star"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">[w:Choice]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;w id="Choice"&gt;&lt;/&gt;</span></div>
@@ -499,13 +516,22 @@
     });
     fillButtons(el("tbAnims"), V.anims, function (n) {
       var ov = el("tbOvlook").checked;
-      insertAtCursor("@" + n + (ov ? "!" : ""));
+      var btOn = el("tbBlendTimeOn").checked;
+      var bt = parseFloat(el("tbBlendTime").value);
+      var suffix = "";
+      if (ov) suffix += "!";
+      if (btOn && !isNaN(bt)) suffix += ":" + bt;
+      insertAtCursor("@" + n + suffix);
     });
     fillButtons(el("tbImages"), V.images, function (n) { insertAtCursor("[img:" + n + "]"); });
     fillButtons(el("tbWidgets"), V.widgets, function (n) { insertAtCursor("[w:" + n + "]"); });
     el("rowImages").style.display = V.images.length ? "" : "none";
     el("rowWidgets").style.display = V.widgets.length ? "" : "none";
   }
+  // Enable/disable the blend-time number input alongside its checkbox.
+  el("tbBlendTimeOn").addEventListener("change", function () {
+    el("tbBlendTime").disabled = !this.checked;
+  });
 
   // ---------- the expander ----------
   function expand(src) {
@@ -555,11 +581,14 @@
           i += 2 + (rest ? rest[0].length : 0);
           continue;
         }
-        var am = src.slice(i + 1).match(/^([A-Za-z0-9_]+)(!?)/);
+        var am = src.slice(i + 1).match(/^([A-Za-z0-9_]+)(!?)(?::(\d+(?:\.\d+)?))?/);
         if (am) {
           flush();
-          var animName = am[1], ovr = am[2] === "!";
-          out += '<anim n="' + animName + '"' + (ovr ? ' ovlook="true"' : '') + '></>';
+          var animName = am[1], ovr = am[2] === "!", btStr = am[3];
+          out += '<anim n="' + animName + '"'
+              + (ovr ? ' ovlook="true"' : '')
+              + (btStr ? ' blendtime="' + btStr + '"' : '')
+              + '></>';
           if (V.anims.indexOf(animName) === -1) mark(unknown.anims, animName);
           i += 1 + am[0].length; continue;
         }
@@ -638,6 +667,7 @@
       } else if (name === "anim") {
         out += "@" + (attrs.n || "");
         if (attrs.ovlook === "true" || attrs.ovlook === "1") out += "!";
+        if (attrs.blendtime !== undefined && attrs.blendtime !== "") out += ":" + attrs.blendtime;
       } else if (name === "stopanim") {
         out += "@-";
       } else if (name === "img" || name === "image" || name === "i") {
@@ -701,7 +731,7 @@
           out += '<span class="hl-anim">' + esc(src.slice(i, i + len)) + '</span>';
           i += len; continue;
         }
-        var am = src.slice(i + 1).match(/^[A-Za-z0-9_]+!?/);
+        var am = src.slice(i + 1).match(/^[A-Za-z0-9_]+!?(?::\d+(?:\.\d+)?)?/);
         if (am) {
           out += '<span class="hl-anim">' + esc(src.slice(i, i + 1 + am[0].length)) + '</span>';
           i += 1 + am[0].length; continue;
