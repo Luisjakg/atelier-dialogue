@@ -254,8 +254,7 @@
   .tb-mod input[type="number"]:disabled { opacity: 0.4; cursor: not-allowed; }
   .tb-mod + .tb-mod { margin-left: 8px; }
   .tb-mod:hover { color: var(--ink); }
-  .tb-row:has(.tb-mod input[type="checkbox"]:checked) .tb-mod input[type="checkbox"] ~ * { color: var(--teal); }
-  .tb-row:has(.tb-mod input:checked) .tb-mod { color: var(--teal); background: #54b2ab14; }
+  .tb-mod:has(input[type="checkbox"]:checked) { color: var(--teal); background: #54b2ab14; }
 
   .out {
     font-family: "JetBrains Mono", monospace; font-size: 13px;
