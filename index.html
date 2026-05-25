@@ -13,7 +13,7 @@
   @WaveHand:0.25        -> <anim n="WaveHand" blendtime="0.25"></>  (trailing :NUM = blend time)
   @WaveHand!:0.25       -> <anim n="WaveHand" ovlook="true" blendtime="0.25"></>
   @-                    -> <stopanim></>                      (stops current animation)
-  $$                    -> <switchtarget></>                  (broadcasts OnSwitchTargetTag, parameterless)
+  $0  $1  $2            -> <switchtarget p="0"></> ...        (broadcasts OnSwitchTargetTag with player index)
   [img:RowName]         -> <img id="RowName"></>
   [w:RowName]           -> <w id="RowName"></>
   {pc}                  -> <pc/>
@@ -394,7 +394,8 @@
         <span class="tb-label">other</span>
         <button class="fixed" data-act="pc" title="Player-count substitution">{pc}</button>
         <button class="fixed" data-act="thought" title="Wrap selection as a thought">(&nbsp;thought&nbsp;)</button>
-        <button class="fixed" data-act="switchtarget" title="Fire OnSwitchTargetTag at this position">$$&nbsp;switch</button>
+        <button class="fixed" data-act="switch0" title="Fire OnSwitchTargetTag with player index 0">$0</button>
+        <button class="fixed" data-act="switch1" title="Fire OnSwitchTargetTag with player index 1">$1</button>
       </div>
     </div>
     <div class="composer-wrap">
@@ -443,7 +444,7 @@
         <div><span class="lhs">@WaveHand!</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" ovlook="true"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">@WaveHand:0.25</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" blendtime="0.25"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">@-</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;stopanim&gt;&lt;/&gt;</span></div>
-        <div><span class="lhs">$$</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;switchtarget&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">$0</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;switchtarget p="0"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">[img:Star]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;img id="Star"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">[w:Choice]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;w id="Choice"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">{pc}</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;pc/&gt;</span></div>
@@ -598,10 +599,14 @@
         buf += c; i++; continue;
       }
 
-      if (c === "$" && src[i + 1] === "$") {
-        flush();
-        out += "<switchtarget></>";
-        i += 2; continue;
+      if (c === "$") {
+        var sm = src.slice(i + 1).match(/^\d+/);
+        if (sm) {
+          flush();
+          out += '<switchtarget p="' + sm[0] + '"></>';
+          i += 1 + sm[0].length; continue;
+        }
+        buf += c; i++; continue;
       }
 
       if (c === "{") {
@@ -635,6 +640,7 @@
       if (ch === "\\") out += "\\\\";
       else if (ch === "[") out += "\\[";
       else if (ch === "@" && /[A-Za-z0-9_\-]/.test(text[k + 1] || "")) out += "\\@";
+      else if (ch === "$" && /\d/.test(text[k + 1] || "")) out += "\\$";
       else if (ch === "{" && text.slice(k, k + 4).toLowerCase() === "{pc}") out += "\\{";
       else out += ch;
     }
@@ -680,7 +686,7 @@
       } else if (name === "stopanim") {
         out += "@-";
       } else if (name === "switchtarget") {
-        out += "$$";
+        out += "$" + (attrs.p || "0");
       } else if (name === "img" || name === "image" || name === "i") {
         out += "[img:" + (attrs.id || "") + "]";
       } else if (name === "w" || name === "widget") {
@@ -749,9 +755,12 @@
         }
       }
 
-      if (c === "$" && src[i + 1] === "$") {
-        out += '<span class="hl-switch">$$</span>';
-        i += 2; continue;
+      if (c === "$") {
+        var sm2 = src.slice(i + 1).match(/^\d+/);
+        if (sm2) {
+          out += '<span class="hl-switch">' + esc(src.slice(i, i + 1 + sm2[0].length)) + '</span>';
+          i += 1 + sm2[0].length; continue;
+        }
       }
 
       if (c === "{") {
@@ -832,7 +841,8 @@
     if (act === "stopanim") { insertAtCursor("@-"); }
     else if (act === "pc") { insertAtCursor("{pc}"); }
     else if (act === "thought") { wrapSelection("(", ")"); }
-    else if (act === "switchtarget") { insertAtCursor("$$"); }
+    else if (act === "switch0") { insertAtCursor("$0"); }
+    else if (act === "switch1") { insertAtCursor("$1"); }
   });
 
   function flashMsg(node, txt) { node.textContent = txt; setTimeout(function () { node.textContent = ""; }, 1600); }
