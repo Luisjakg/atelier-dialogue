@@ -13,12 +13,12 @@
   @WaveHand:0.25        -> <anim n="WaveHand" blendtime="0.25"></>  (trailing :NUM = blend time)
   @WaveHand!:0.25       -> <anim n="WaveHand" ovlook="true" blendtime="0.25"></>
   @-                    -> <stopanim></>                      (stops current animation)
-  $Player               -> <switchtarget n="Player"></>       (broadcasts OnSwitchTargetTag)
+  $$                    -> <switchtarget></>                  (broadcasts OnSwitchTargetTag, parameterless)
   [img:RowName]         -> <img id="RowName"></>
   [w:RowName]           -> <w id="RowName"></>
   {pc}                  -> <pc/>
   (a thought)           -> passes through literally (engine handles PRT_THOUGHT)
-  \@ \$ \[ \] \{ \\     -> escape, prints the literal character
+  \@ \[ \] \{ \\        -> escape, prints the literal character
 
   Persistence: window.storage inside Claude, localStorage when hosted/embedded,
   in-memory as a last resort. Safe to host (e.g. GitHub Pages) and embed in Notion.
@@ -347,10 +347,6 @@
           <textarea id="vAnims" placeholder="WaveHand, HeadPop, Nod"></textarea>
         </div>
         <div>
-          <label class="fld">Switch targets &mdash; &lt;switchtarget&gt;</label>
-          <textarea id="vSwitchTargets" placeholder="Player, NPC, Merchant"></textarea>
-        </div>
-        <div>
           <label class="fld">Image rows &mdash; ImageSet</label>
           <textarea id="vImages" placeholder="ButtonA, IconStar"></textarea>
         </div>
@@ -386,10 +382,6 @@
           <input type="number" id="tbBlendTime" value="0.25" min="0" step="0.05" disabled />
         </label>
       </div>
-      <div class="tb-row" id="rowSwitchTargets">
-        <span class="tb-label">targets</span>
-        <span class="tb-buttons" id="tbSwitchTargets"></span>
-      </div>
       <div class="tb-row" id="rowImages">
         <span class="tb-label">images</span>
         <span class="tb-buttons" id="tbImages"></span>
@@ -402,6 +394,7 @@
         <span class="tb-label">other</span>
         <button class="fixed" data-act="pc" title="Player-count substitution">{pc}</button>
         <button class="fixed" data-act="thought" title="Wrap selection as a thought">(&nbsp;thought&nbsp;)</button>
+        <button class="fixed" data-act="switchtarget" title="Fire OnSwitchTargetTag at this position">$$&nbsp;switch</button>
       </div>
     </div>
     <div class="composer-wrap">
@@ -450,7 +443,7 @@
         <div><span class="lhs">@WaveHand!</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" ovlook="true"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">@WaveHand:0.25</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" blendtime="0.25"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">@-</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;stopanim&gt;&lt;/&gt;</span></div>
-        <div><span class="lhs">$Player</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;switchtarget n="Player"&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">$$</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;switchtarget&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">[img:Star]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;img id="Star"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">[w:Choice]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;w id="Choice"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">{pc}</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;pc/&gt;</span></div>
@@ -496,7 +489,7 @@
   }
 
   // ---------- vocab ----------
-  var V = { styles: [], anims: [], switchTargets: [], images: [], widgets: [], defaultStyle: "Default" };
+  var V = { styles: [], anims: [], images: [], widgets: [], defaultStyle: "Default" };
   function splitNames(s) {
     return (s || "").split(/[\s,]+/).map(function (x) { return x.trim(); }).filter(Boolean);
   }
@@ -505,7 +498,6 @@
   function readVocabFromUI() {
     V.styles = splitNames(el("vStyles").value);
     V.anims = splitNames(el("vAnims").value);
-    V.switchTargets = splitNames(el("vSwitchTargets").value);
     V.images = splitNames(el("vImages").value);
     V.widgets = splitNames(el("vWidgets").value);
     V.defaultStyle = (el("vDefault").value || "Default").trim() || "Default";
@@ -534,10 +526,8 @@
       if (btOn && !isNaN(bt)) suffix += ":" + bt;
       insertAtCursor("@" + n + suffix);
     });
-    fillButtons(el("tbSwitchTargets"), V.switchTargets, function (n) { insertAtCursor("$" + n); });
     fillButtons(el("tbImages"), V.images, function (n) { insertAtCursor("[img:" + n + "]"); });
     fillButtons(el("tbWidgets"), V.widgets, function (n) { insertAtCursor("[w:" + n + "]"); });
-    el("rowSwitchTargets").style.display = V.switchTargets.length ? "" : "none";
     el("rowImages").style.display = V.images.length ? "" : "none";
     el("rowWidgets").style.display = V.widgets.length ? "" : "none";
   }
@@ -548,7 +538,7 @@
 
   // ---------- the expander ----------
   function expand(src) {
-    var unknown = { styles: {}, anims: {}, switchTargets: {}, images: {}, widgets: {} };
+    var unknown = { styles: {}, anims: {}, images: {}, widgets: {} };
     function mark(set, name) { set[name] = true; }
     var out = "", buf = "";
     var stack = [{ name: V.defaultStyle, dh: false }];
@@ -608,16 +598,10 @@
         buf += c; i++; continue;
       }
 
-      if (c === "$") {
-        var sm = src.slice(i + 1).match(/^[A-Za-z0-9_]+/);
-        if (sm) {
-          flush();
-          var targetName = sm[0];
-          out += '<switchtarget n="' + targetName + '"></>';
-          if (V.switchTargets.indexOf(targetName) === -1) mark(unknown.switchTargets, targetName);
-          i += 1 + sm[0].length; continue;
-        }
-        buf += c; i++; continue;
+      if (c === "$" && src[i + 1] === "$") {
+        flush();
+        out += "<switchtarget></>";
+        i += 2; continue;
       }
 
       if (c === "{") {
@@ -632,7 +616,6 @@
     var list = [];
     function push(label, set) { var k = Object.keys(set); if (k.length) list.push(label + ": " + k.join(", ")); }
     push("style", unknown.styles); push("anim", unknown.anims);
-    push("switch target", unknown.switchTargets);
     push("image", unknown.images); push("widget", unknown.widgets);
     return { out: out, unknown: list };
   }
@@ -652,7 +635,6 @@
       if (ch === "\\") out += "\\\\";
       else if (ch === "[") out += "\\[";
       else if (ch === "@" && /[A-Za-z0-9_\-]/.test(text[k + 1] || "")) out += "\\@";
-      else if (ch === "$" && /[A-Za-z0-9_]/.test(text[k + 1] || "")) out += "\\$";
       else if (ch === "{" && text.slice(k, k + 4).toLowerCase() === "{pc}") out += "\\{";
       else out += ch;
     }
@@ -698,7 +680,7 @@
       } else if (name === "stopanim") {
         out += "@-";
       } else if (name === "switchtarget") {
-        out += "$" + (attrs.n || "");
+        out += "$$";
       } else if (name === "img" || name === "image" || name === "i") {
         out += "[img:" + (attrs.id || "") + "]";
       } else if (name === "w" || name === "widget") {
@@ -767,12 +749,9 @@
         }
       }
 
-      if (c === "$") {
-        var sm2 = src.slice(i + 1).match(/^[A-Za-z0-9_]+/);
-        if (sm2) {
-          out += '<span class="hl-switch">' + esc(src.slice(i, i + 1 + sm2[0].length)) + '</span>';
-          i += 1 + sm2[0].length; continue;
-        }
+      if (c === "$" && src[i + 1] === "$") {
+        out += '<span class="hl-switch">$$</span>';
+        i += 2; continue;
       }
 
       if (c === "{") {
@@ -853,6 +832,7 @@
     if (act === "stopanim") { insertAtCursor("@-"); }
     else if (act === "pc") { insertAtCursor("{pc}"); }
     else if (act === "thought") { wrapSelection("(", ")"); }
+    else if (act === "switchtarget") { insertAtCursor("$$"); }
   });
 
   function flashMsg(node, txt) { node.textContent = txt; setTimeout(function () { node.textContent = ""; }, 1600); }
@@ -927,12 +907,11 @@
   });
 
   // ---------- vocab wiring + boot ----------
-  ["vStyles", "vAnims", "vSwitchTargets", "vImages", "vWidgets", "vDefault"].forEach(function (id) {
+  ["vStyles", "vAnims", "vImages", "vWidgets", "vDefault"].forEach(function (id) {
     el(id).addEventListener("input", function () {
       readVocabFromUI(); refreshToolbar(); renderComposer(); renderBatch();
       save("vocab", {
         styles: el("vStyles").value, anims: el("vAnims").value,
-        switchTargets: el("vSwitchTargets").value,
         images: el("vImages").value, widgets: el("vWidgets").value, def: el("vDefault").value
       });
     });
@@ -942,13 +921,11 @@
     var vsaved = await load("vocab");
     if (vsaved) {
       el("vStyles").value = vsaved.styles || ""; el("vAnims").value = vsaved.anims || "";
-      el("vSwitchTargets").value = vsaved.switchTargets || "";
       el("vImages").value = vsaved.images || "";
       el("vWidgets").value = vsaved.widgets || ""; el("vDefault").value = vsaved.def || "Default";
     } else {
       el("vStyles").value = "Default, Whisper, Shout, Spell";
       el("vAnims").value = "WaveHand, HeadPop, Nod";
-      el("vSwitchTargets").value = "Player, NPC";
       el("vDefault").value = "Default";
       el("vocabBox").open = true;
     }
