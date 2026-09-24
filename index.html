@@ -20,8 +20,9 @@
   (a thought)           -> passes through literally (engine handles PRT_THOUGHT)
   \@ \[ \] \{ \\        -> escape, prints the literal character
 
-  Spellcheck: en_US (Typo.js from jsDelivr) on dialogue text only, never on tags.
-  Right-click an underlined word for suggestions or to add it to your dictionary.
+  Checks: spelling (en_US, Typo.js from jsDelivr) plus house rules (end punctuation,
+  capitals, double spaces, punctuation spacing, repeated words), run on the text the
+  player sees, never on tags. Right-click an underline to fix; toggles under Vocabulary.
 
   Persistence: window.storage inside Claude, localStorage when hosted/embedded,
   in-memory as a last resort. Safe to host (e.g. GitHub Pages) and embed in Notion.
@@ -218,6 +219,7 @@
   .hl-thought{ color: var(--ink-faint); font-style: italic; }
   .hl-esc    { color: var(--ink-faint); }
   .hl-miss   { text-decoration: underline wavy #e0605a; text-decoration-skip-ink: none; text-underline-offset: 3px; }
+  .hl-rule   { text-decoration: underline wavy #6ea8fe; text-decoration-skip-ink: none; text-underline-offset: 3px; }
 
   .spell-menu {
     position: fixed; z-index: 50; min-width: 150px; padding: 4px;
@@ -229,8 +231,18 @@
     font: inherit; color: var(--ink); background: transparent; border: 0; border-radius: 4px; padding: 5px 9px;
   }
   .spell-menu button:hover { background: #54b2ab22; }
-  .spell-menu button.add { color: var(--ink-dim); border-top: 1px solid var(--line); border-radius: 0 0 4px 4px; }
+  .spell-menu button.add { color: var(--ink-dim); }
   .spell-menu .none { color: var(--ink-faint); font-style: italic; padding: 5px 9px; }
+  .spell-menu .msg { color: var(--ink-dim); font-family: "Spectral", serif; font-style: italic; font-size: 13px; padding: 4px 9px 2px; max-width: 260px; }
+  .spell-menu .sep { border-top: 1px solid var(--line); margin: 4px 0; }
+
+  .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .checks label {
+    display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
+    font-style: italic; font-size: 13px; color: var(--ink-dim);
+  }
+  .checks input { accent-color: var(--teal); margin: 0; }
+  .checks label:has(input:checked) { color: var(--ink); }
 
   .toolbar { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
   .tb-row {
@@ -351,7 +363,7 @@
   <!-- VOCAB -->
   <div class="card">
     <details class="vocab" id="vocabBox">
-      <summary><span class="chev">&#9656;</span> Vocabulary <span style="font-size:12px;color:var(--ink-dim);font-weight:400;font-family:Spectral">&mdash; names from your data tables (powers the toolbar &amp; typo warnings)</span></summary>
+      <summary><span class="chev">&#9656;</span> Vocabulary &amp; checks <span style="font-size:12px;color:var(--ink-dim);font-weight:400;font-family:Spectral">&mdash; names from your data tables (powers the toolbar &amp; typo warnings)</span></summary>
       <div class="vocab-grid">
         <div>
           <label class="fld">Text styles &mdash; ProtoTextStyleSet rows</label>
@@ -373,6 +385,8 @@
         </div>
       </div>
       <div class="row"><span class="hint">Separate names with commas, spaces, or new lines. Saved automatically.</span></div>
+      <label class="fld">Composer checks &mdash; <span style="color:#e0605a">red</span> spelling, <span style="color:#6ea8fe">blue</span> house rules; right-click an underline to fix</label>
+      <div class="checks" id="checksBox"></div>
     </details>
   </div>
 
@@ -724,12 +738,24 @@
     return safe;
   }
 
-  // ---------- spellcheck ----------
-  // Hunspell en_US via Typo.js. Only plain dialogue text is checked; tags are tokenized out first.
+  // ---------- spelling & house rules ----------
+  // Checks run on the text the player sees (tags removed), so they work across tags.
+  // Spelling is Hunspell en_US via Typo.js.
   var TYPO_CDN = "https://cdn.jsdelivr.net/npm/typo-js@1.3.2/";
   var speller = null, userDict = {};
-  var typingWordEnd = -1; // caret right after an edit; the word ending there isn't flagged until you move on
+  var typingWordEnd = -1; // caret right after an edit; issues ending there wait until you move on
   var WORD_RE = /\p{L}+(?:['’]\p{L}+)*/gu;
+  var CHECKS = [
+    { id: "spell",  label: "Spelling" },
+    { id: "endp",   label: "End punctuation" },
+    { id: "cap",    label: "Capital after sentence" },
+    { id: "spaces", label: "Double spaces" },
+    { id: "punct",  label: "Punctuation spacing" },
+    { id: "repeat", label: "Repeated words" }
+  ];
+  var checksOff = {};
+  var lastIssues = [], lastIssuesSrc = null;
+  var ABBREV = { mr: 1, mrs: 1, ms: 1, dr: 1, st: 1, vs: 1, etc: 1 };
 
   function loadSpeller() {
     var s = document.createElement("script");
@@ -750,84 +776,54 @@
     var w = word.replace(/’/g, "'");
     return !userDict[w.toLowerCase()] && !speller.check(w);
   }
-  // Escapes plain text, wrapping misspelled words. start = index of text within the composer source.
-  function spellMark(text, start) {
-    if (!speller) return esc(text);
-    var out = "", last = 0, m;
-    WORD_RE.lastIndex = 0;
-    while ((m = WORD_RE.exec(text)) !== null) {
-      var s = start + m.index;
-      if (s + m[0].length === typingWordEnd || !isMisspelled(m[0])) continue;
-      out += esc(text.slice(last, m.index)) +
-        '<span class="hl-miss" data-s="' + s + '" data-w="' + esc(m[0]) + '">' + esc(m[0]) + "</span>";
-      last = m.index + m[0].length;
-    }
-    return out + esc(text.slice(last));
-  }
 
-  // Syntax-highlight the shorthand source for the composer overlay.
-  function highlightShorthand(src) {
-    var out = "", plain = "", plainStart = 0, i = 0, n = src.length;
-    function emit(html) {
-      if (plain) { out += spellMark(plain, plainStart); plain = ""; }
-      out += html;
+  // Splits the shorthand source into tag and text segments.
+  // ph = tag the player sees as an inline object ({pc}, images, widgets).
+  function tokenize(src) {
+    var segs = [], i = 0, n = src.length, ts = -1;
+    function push(seg) {
+      if (ts !== -1) { segs.push({ t: "text", s: ts, e: seg.s }); ts = -1; }
+      segs.push(seg);
+    }
+    function tag(cls, s, e, ph, html) {
+      push({ t: "tag", s: s, e: e, ph: ph, html: html || '<span class="' + cls + '">' + esc(src.slice(s, e)) + "</span>" });
     }
     while (i < n) {
       var c = src[i];
 
-      if (c === "\\" && i + 1 < n) {
-        emit('<span class="hl-esc">' + esc(src.slice(i, i + 2)) + '</span>');
-        i += 2; continue;
-      }
+      if (c === "\\" && i + 1 < n) { push({ t: "esc", s: i, e: i + 2 }); i += 2; continue; }
 
       if (c === "[") {
         var end = src.indexOf("]", i + 1);
         if (end !== -1) {
           var inner = src.slice(i + 1, end);
-          var full = src.slice(i, end + 1);
           if (/^(img|image|i|w|widget)\s*:\s*.+$/i.test(inner)) {
-            emit('<span class="hl-asset">' + esc(full) + '</span>');
-          } else if (inner === "/") {
-            emit('<span class="hl-style">' + esc(full) + '</span>');
+            tag("hl-asset", i, end + 1, true);
+          } else if (inner !== "/" && inner.trim().slice(-1) === "*") {
+            // Style open with donthide. Highlight the * in gold for distinction.
+            var st = inner.lastIndexOf("*");
+            tag("", i, end + 1, false, '<span class="hl-style">[' + esc(inner.slice(0, st)) +
+              '<span class="star">*</span>' + esc(inner.slice(st + 1)) + "]</span>");
           } else {
-            // Style open. Highlight the trailing * (donthide) in gold for distinction.
-            var name = inner.trim();
-            if (name.slice(-1) === "*") {
-              emit('<span class="hl-style">[' + esc(name.slice(0, -1)) + '<span class="star">*</span>]</span>');
-            } else {
-              emit('<span class="hl-style">' + esc(full) + '</span>');
-            }
+            tag("hl-style", i, end + 1, false);
           }
           i = end + 1; continue;
         }
       }
 
       if (c === "@") {
-        if (src.slice(i, i + 3) === "@-@") {
-          emit('<span class="hl-anim">@-@</span>');
-          i += 3; continue;
-        }
-        var am = src.slice(i + 1).match(/^[A-Za-z0-9_]+!?(?::\d+(?:\.\d+)?)?@/);
-        if (am) {
-          emit('<span class="hl-anim">' + esc(src.slice(i, i + 1 + am[0].length)) + '</span>');
-          i += 1 + am[0].length; continue;
-        }
+        var am = src.slice(i).match(/^@(?:-|[A-Za-z0-9_]+!?(?::\d+(?:\.\d+)?)?)@/);
+        if (am) { tag("hl-anim", i, i + am[0].length, false); i += am[0].length; continue; }
       }
 
       if (c === "$") {
-        var sm2 = src.slice(i + 1).match(/^\d+/);
-        if (sm2) {
-          emit('<span class="hl-switch">' + esc(src.slice(i, i + 1 + sm2[0].length)) + '</span>');
-          i += 1 + sm2[0].length; continue;
-        }
+        var sm = src.slice(i + 1).match(/^\d+/);
+        if (sm) { tag("hl-switch", i, i + 1 + sm[0].length, false); i += 1 + sm[0].length; continue; }
       }
 
       if (c === "{") {
         var ce = src.indexOf("}", i + 1);
-        if (ce !== -1 && src.slice(i + 1, ce).trim().toLowerCase() === "pc") {
-          emit('<span class="hl-pc">' + esc(src.slice(i, ce + 1)) + '</span>');
-          i = ce + 1; continue;
-        }
+        if (ce !== -1 && src.slice(i + 1, ce).trim().toLowerCase() === "pc") { tag("hl-pc", i, ce + 1, true); i = ce + 1; continue; }
       }
 
       if (c === "(") {
@@ -835,23 +831,168 @@
         if (pe !== -1) {
           var content = src.slice(i, pe + 1);
           if (content.indexOf("(", 1) === -1 && content.indexOf("\n") === -1) {
-            emit('<span class="hl-thought">' + spellMark(content, i) + '</span>');
-            i = pe + 1; continue;
+            push({ t: "thought", s: i, e: pe + 1 }); i = pe + 1; continue;
           }
         }
       }
 
-      // Raw markup (pasted before "From markup") isn't dialogue; keep it out of the spellcheck.
+      // Raw markup (pasted before "From markup") isn't dialogue.
       if (c === "<") {
         var mk = src.slice(i).match(/^<(?:\/>|\/?[A-Za-z][^<>\n]*>)/);
-        if (mk) { emit(esc(mk[0])); i += mk[0].length; continue; }
+        if (mk) { tag("", i, i + mk[0].length, false, esc(mk[0])); i += mk[0].length; continue; }
       }
 
-      if (!plain) plainStart = i;
-      plain += c;
+      if (ts === -1) ts = i;
       i++;
     }
-    emit("");
+    if (ts !== -1) segs.push({ t: "text", s: ts, e: n });
+    return segs;
+  }
+
+  // Finds spelling and house-rule issues in the visible text.
+  // vsrc maps each visible char to its source index; vok marks chars that can be underlined.
+  function findIssues(vis, vsrc, vok) {
+    var issues = [], m;
+    function on(id) { return !checksOff[id]; }
+    function del(vs, ve) {
+      var ed = [];
+      for (var k = vs; k < ve; k++) ed.push({ s: vsrc[k], e: vsrc[k] + 1, text: "" });
+      return ed;
+    }
+    function add(rule, vs, ve, msg, fixLabel, fix) {
+      issues.push({ rule: rule, vs: vs, ve: ve, msg: msg, fixLabel: fixLabel, fix: fix });
+    }
+    function wordEnd(k) { while (k < vis.length && /[\p{L}'’]/u.test(vis[k])) k++; return k; }
+
+    if (on("spell") && speller) {
+      WORD_RE.lastIndex = 0;
+      while ((m = WORD_RE.exec(vis)) !== null) {
+        if (!isMisspelled(m[0])) continue;
+        var ws = m.index, we = ws + m[0].length;
+        // Suggestions can only replace a word that isn't split by a tag.
+        var whole = vsrc[we - 1] - vsrc[ws] === we - ws - 1;
+        issues.push({ rule: "spell", vs: ws, ve: we, word: m[0], range: whole ? { s: vsrc[ws], e: vsrc[we - 1] + 1 } : null });
+      }
+    }
+
+    var lineStart = 0;
+    vis.split("\n").forEach(function (line) {
+      var base = lineStart;
+      lineStart += line.length + 1;
+
+      if (on("endp")) {
+        var k = line.search(/\s*$/) - 1;
+        if (k >= 0 && /[\p{L}\p{N},;:]/u.test(line[k])) {
+          var ls = line.lastIndexOf(" ", k) + 1;
+          if (/[,;:]/.test(line[k])) {
+            add("endp", base + k, base + k + 1, "Line ends with “" + line[k] + "”.", "Replace with a period",
+              [{ s: vsrc[base + k], e: vsrc[base + k] + 1, text: "." }]);
+          } else {
+            add("endp", base + ls, base + k + 1, "Line doesn’t end with punctuation.", "Add a period",
+              [{ s: vsrc[base + k] + 1, e: vsrc[base + k] + 1, text: "." }]);
+          }
+        }
+      }
+
+      if (on("cap")) {
+        var capRe = /(^|([.!?])["'”’)\]]*\s+)(["'“‘(]*)(\p{Ll})/gu;
+        while ((m = capRe.exec(line)) !== null) {
+          var at = m.index + m[1].length + m[3].length;
+          if (m[2] === ".") {
+            var before = line.slice(0, m.index).match(/(\S*)$/)[1];
+            if (/\.$/.test(before) || before.indexOf(".") !== -1 || ABBREV[before.toLowerCase()]) continue;
+          }
+          add("cap", base + at, base + wordEnd(at), "Sentence starts with a lowercase letter.", "Capitalize",
+            [{ s: vsrc[base + at], e: vsrc[base + at] + 1, text: line[at].toUpperCase() }]);
+        }
+      }
+
+      if (on("spaces")) {
+        var spRe = /(^ +)(?=\S)|( {2,})/g;
+        while ((m = spRe.exec(line)) !== null) {
+          var s0 = base + m.index, s1 = s0 + m[0].length;
+          if (m[1]) add("spaces", s0, s1, "Space at the start of the line.", "Remove it", del(s0, s1));
+          else add("spaces", s0, s1, "Double space.", "Make it one space", del(s0 + 1, s1));
+        }
+      }
+
+      if (on("punct")) {
+        var beforeRe = /(\S) +(?=[,.!?;:])/g;
+        while ((m = beforeRe.exec(line)) !== null) {
+          var bs = m.index + 1, be = m.index + m[0].length;
+          if (line.slice(be, be + 3) === "...") continue; // spaced ellipsis is a style choice
+          add("punct", base + bs, base + be, "Space before punctuation.", "Remove it", del(base + bs, base + be));
+        }
+        var afterRe = /[,;:!?](?=\p{L})|(?<!\.)\.(?=\p{Lu})/gu;
+        while ((m = afterRe.exec(line)) !== null) {
+          var p = base + m.index;
+          add("punct", p, p + 2, "Missing space after “" + m[0] + "”.", "Add a space",
+            [{ s: vsrc[p] + 1, e: vsrc[p] + 1, text: " " }]);
+        }
+      }
+
+      if (on("repeat")) {
+        var repRe = /(?<![\p{L}'’])(\p{L}+)(\s+)(\1)(?![\p{L}'’])/giu;
+        while ((m = repRe.exec(line)) !== null) {
+          var r1 = base + m.index + m[1].length, r2 = r1 + m[2].length + m[3].length;
+          add("repeat", r1 + m[2].length, r2, "Repeated word “" + m[3] + "”.", "Remove the repeat", del(r1, r2));
+        }
+      }
+    });
+
+    // Hide issues until the word being typed is finished, and drop any that can't be shown.
+    return issues.filter(function (it) {
+      if (vsrc[it.ve - 1] + 1 === typingWordEnd) return false;
+      for (var k = it.vs; k < it.ve; k++) if (vok[k]) return true;
+      return false;
+    });
+  }
+
+  // Syntax-highlight the shorthand source for the composer overlay, underlining issues.
+  function highlightShorthand(src) {
+    var segs = tokenize(src);
+    var vis = "", vsrc = [], vok = [];
+    segs.forEach(function (g) {
+      if (g.t === "text" || g.t === "thought") {
+        for (var k = g.s; k < g.e; k++) { vis += src[k]; vsrc.push(k); vok.push(true); }
+      } else if (g.t === "esc") {
+        vis += src[g.s + 1]; vsrc.push(g.s + 1); vok.push(false);
+      } else if (g.ph) {
+        vis += "￼"; vsrc.push(g.s); vok.push(false);
+      }
+    });
+
+    var issues = findIssues(vis, vsrc, vok);
+    lastIssues = issues; lastIssuesSrc = src;
+    var marks = vis.split("").map(function () { return []; });
+    issues.forEach(function (it, id) { for (var k = it.vs; k < it.ve; k++) marks[k].push(id); });
+
+    var out = "", v = 0;
+    function textRuns(s, e) {
+      var html = "", run = "", key = null;
+      function flush() {
+        if (!run) return;
+        if (!key) html += esc(run);
+        else {
+          var spell = key.split(",").some(function (id) { return issues[+id].rule === "spell"; });
+          html += '<span class="' + (spell ? "hl-miss" : "hl-rule") + '" data-i="' + key + '">' + esc(run) + "</span>";
+        }
+        run = "";
+      }
+      for (var k = s; k < e; k++, v++) {
+        var kk = marks[v].join(",") || null;
+        if (kk !== key) { flush(); key = kk; }
+        run += src[k];
+      }
+      flush();
+      return html;
+    }
+    segs.forEach(function (g) {
+      if (g.t === "text") out += textRuns(g.s, g.e);
+      else if (g.t === "thought") out += '<span class="hl-thought">' + textRuns(g.s, g.e) + "</span>";
+      else if (g.t === "esc") { out += '<span class="hl-esc">' + esc(src.slice(g.s, g.e)) + "</span>"; v++; }
+      else { out += g.html; if (g.ph) v++; }
+    });
     // Trailing newline padding so caret on the last empty line is in sync with the overlay.
     return out + "\n";
   }
@@ -915,30 +1056,34 @@
     if (typingWordEnd !== -1) { typingWordEnd = -1; renderHighlight(); }
   });
 
-  // Right-click a misspelled word for suggestions; anywhere else keeps the browser menu.
+  // Right-click an underlined issue for fixes; anywhere else keeps the browser menu.
   var spellMenu = null;
   function closeSpellMenu() { if (spellMenu) { spellMenu.remove(); spellMenu = null; } }
-  function replaceWord(start, word, repl) {
+  // Applies source edits from the last check, if the text hasn't changed since.
+  function applyEdits(edits) {
     var v = composer.value;
-    if (v.substr(start, word.length) !== word) return;
-    composer.value = v.slice(0, start) + repl + v.slice(start + word.length);
+    if (v !== lastIssuesSrc) return;
+    edits = edits.slice().sort(function (a, b) { return b.s - a.s; });
+    edits.forEach(function (ed) { v = v.slice(0, ed.s) + ed.text + v.slice(ed.e); });
+    var first = edits[edits.length - 1];
+    composer.value = v;
     composer.focus();
-    composer.selectionStart = composer.selectionEnd = start + repl.length;
+    composer.selectionStart = composer.selectionEnd = first.s + first.text.length;
     typingWordEnd = -1;
     renderComposer();
   }
   composer.addEventListener("contextmenu", function (ev) {
     closeSpellMenu();
-    if (!speller) return;
     var hit = null;
-    composerHl.querySelectorAll(".hl-miss").forEach(function (sp) {
+    composerHl.querySelectorAll(".hl-miss, .hl-rule").forEach(function (sp) {
       Array.prototype.forEach.call(sp.getClientRects(), function (r) {
         if (ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom) hit = sp;
       });
     });
     if (!hit) return;
     ev.preventDefault();
-    var start = +hit.getAttribute("data-s"), word = hit.getAttribute("data-w");
+    var list = hit.getAttribute("data-i").split(",").map(function (id) { return lastIssues[+id]; });
+    list.sort(function (a, b) { return (a.rule === "spell" ? 0 : 1) - (b.rule === "spell" ? 0 : 1); });
     spellMenu = document.createElement("div");
     spellMenu.className = "spell-menu";
     function item(label, cls, fn) {
@@ -947,19 +1092,37 @@
       b.addEventListener("click", function () { closeSpellMenu(); fn(); });
       spellMenu.appendChild(b);
     }
-    var sugg = speller.suggest(word.replace(/’/g, "'"), 5).filter(function (s, k, all) {
-      return all.findIndex(function (t) { return t.toLowerCase() === s.toLowerCase(); }) === k;
-    });
-    sugg.forEach(function (s) { item(s, "", function () { replaceWord(start, word, s); }); });
-    if (!sugg.length) {
-      var none = document.createElement("div");
-      none.className = "none"; none.textContent = "no suggestions";
-      spellMenu.appendChild(none);
+    function note(text, cls) {
+      var d = document.createElement("div");
+      d.className = cls; d.textContent = text;
+      spellMenu.appendChild(d);
     }
-    item("Add “" + word + "” to dictionary", "add", function () {
-      userDict[word.replace(/’/g, "'").toLowerCase()] = true;
-      save("userDict", Object.keys(userDict));
-      renderHighlight();
+    list.forEach(function (it, n) {
+      if (n) note("", "sep");
+      if (it.rule === "spell") {
+        var word = it.word;
+        if (!it.range) note("Split by a tag; fix it by hand.", "none");
+        else {
+          var sugg = speller.suggest(word.replace(/’/g, "'"), 5).filter(function (s, k, all) {
+            return all.findIndex(function (t) { return t.toLowerCase() === s.toLowerCase(); }) === k;
+          });
+          sugg.forEach(function (s) { item(s, "", function () { applyEdits([{ s: it.range.s, e: it.range.e, text: s }]); }); });
+          if (!sugg.length) note("no suggestions", "none");
+        }
+        item("Add “" + word + "” to dictionary", "add", function () {
+          userDict[word.replace(/’/g, "'").toLowerCase()] = true;
+          save("userDict", Object.keys(userDict));
+          renderHighlight();
+        });
+      } else {
+        note(it.msg, "msg");
+        item(it.fixLabel, "", function () { applyEdits(it.fix); });
+        item("Turn off this check", "add", function () {
+          checksOff[it.rule] = true;
+          save("checksOff", checksOff);
+          syncChecksUI(); renderHighlight();
+        });
+      }
     });
     document.body.appendChild(spellMenu);
     var mw = spellMenu.offsetWidth, mh = spellMenu.offsetHeight;
@@ -1054,6 +1217,31 @@
     flashMsg(el("batchMsg"), "\u2713 CSV exported");
   });
 
+  // ---------- check toggles ----------
+  function buildChecksUI() {
+    var box = el("checksBox");
+    box.innerHTML = "";
+    CHECKS.forEach(function (c) {
+      var lab = document.createElement("label");
+      var cb = document.createElement("input");
+      cb.type = "checkbox"; cb.setAttribute("data-check", c.id);
+      cb.addEventListener("change", function () {
+        if (cb.checked) delete checksOff[c.id]; else checksOff[c.id] = true;
+        save("checksOff", checksOff);
+        renderHighlight();
+      });
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(c.label));
+      box.appendChild(lab);
+    });
+    syncChecksUI();
+  }
+  function syncChecksUI() {
+    el("checksBox").querySelectorAll("input").forEach(function (cb) {
+      cb.checked = !checksOff[cb.getAttribute("data-check")];
+    });
+  }
+
   // ---------- vocab wiring + boot ----------
   ["vStyles", "vAnims", "vImages", "vWidgets", "vDefault"].forEach(function (id) {
     el(id).addEventListener("input", function () {
@@ -1081,6 +1269,8 @@
     var bsaved = await load("batch"); if (bsaved) batchIn.value = bsaved;
     var dsaved = await load("userDict");
     if (dsaved) dsaved.forEach(function (w) { userDict[w] = true; });
+    checksOff = (await load("checksOff")) || {};
+    buildChecksUI();
 
     readVocabFromUI(); refreshToolbar(); renderComposer(); renderBatch();
     loadSpeller();
