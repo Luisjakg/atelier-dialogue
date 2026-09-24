@@ -8,11 +8,11 @@
   [Whisper]text[/]      -> <t s="Whisper">text</>            (spans can nest)
   [Whisper*]text[/]     -> <t s="Whisper" donthide>text</>   (trailing * = donthide)
   [*]text[/]            -> <t s="Default" donthide>text</>
-  @WaveHand             -> <anim n="WaveHand"></>
-  @WaveHand!            -> <anim n="WaveHand" ovlook="true"></>  (trailing ! = override look-at)
-  @WaveHand:0.25        -> <anim n="WaveHand" blendtime="0.25"></>  (trailing :NUM = blend time)
-  @WaveHand!:0.25       -> <anim n="WaveHand" ovlook="true" blendtime="0.25"></>
-  @-                    -> <stopanim></>                      (stops current animation)
+  @WaveHand@            -> <anim n="WaveHand"></>             (closing @ lets text follow with no space)
+  @WaveHand!@           -> <anim n="WaveHand" ovlook="true"></>  (trailing ! = override look-at)
+  @WaveHand:0.25@       -> <anim n="WaveHand" blendtime="0.25"></>  (trailing :NUM = blend time)
+  @WaveHand!:0.25@      -> <anim n="WaveHand" ovlook="true" blendtime="0.25"></>
+  @-@                   -> <stopanim></>                      (stops current animation)
   $0  $1  $2            -> <switchtarget p="0"></> ...        (broadcasts OnSwitchTargetTag with player index)
   [img:RowName]         -> <img id="RowName"></>
   [w:RowName]           -> <w id="RowName"></>
@@ -390,7 +390,7 @@
       <div class="tb-row" id="rowAnims">
         <span class="tb-label">anims</span>
         <span class="tb-buttons" id="tbAnims"></span>
-        <button class="fixed" data-act="stopanim" title="Stop the current animation">@-stop</button>
+        <button class="fixed" data-act="stopanim" title="Stop the current animation">@-@ stop</button>
         <label class="tb-mod" title="Append ovlook=&quot;true&quot; (override look-at)">
           <input type="checkbox" id="tbOvlook" /><span>override look-at</span>
         </label>
@@ -417,7 +417,7 @@
     </div>
     <div class="composer-wrap">
       <pre class="composer-hl" id="composerHl" aria-hidden="true"></pre>
-      <textarea id="composer" spellcheck="false" placeholder="Hello.&#10;&#10;Try:  The cauldron hissed. @WaveHand! [Whisper]Careful now[/]&#10;...&#10;He stepped back. (That can't be right.)"></textarea>
+      <textarea id="composer" spellcheck="false" placeholder="Hello.&#10;&#10;Try:  The cauldron hissed. @WaveHand!@ [Whisper]Careful now[/]&#10;...&#10;He stepped back. (That can't be right.)"></textarea>
     </div>
 
     <label class="fld">Expanded markup</label>
@@ -441,7 +441,7 @@
     <div class="card">
       <h2><span class="ix">02</span> Batch &amp; DataTable export</h2>
       <p class="hint" style="margin:0 0 8px">One line per row. Prefix an optional row key with <b style="font-family:JetBrains Mono;color:var(--teal)"> :: </b> &nbsp;e.g. <span style="font-family:JetBrains Mono;color:var(--teal)">Greet_01 :: Hello [Shout]there[/]!</span></p>
-      <textarea id="batchIn" placeholder="Intro_01 :: Welcome to the atelier.&#10;Intro_02 :: [Whisper]Mind the spilled ink.[/]&#10;Greet :: Hello@WaveHand, traveller."></textarea>
+      <textarea id="batchIn" placeholder="Intro_01 :: Welcome to the atelier.&#10;Intro_02 :: [Whisper]Mind the spilled ink.[/]&#10;Greet :: Hello@WaveHand@, traveller."></textarea>
       <div class="row">
         <button class="btn" id="batchCopy">Copy all markup</button>
         <button class="btn ghost" id="batchCsv">Export CSV</button>
@@ -457,10 +457,10 @@
         <div><span class="lhs">plain text</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;t s="Default"&gt;&hellip;&lt;/&gt;</span></div>
         <div><span class="lhs">[Whisper]hi[/]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;t s="Whisper"&gt;hi&lt;/&gt;</span></div>
         <div><span class="lhs">[Spell*]hi[/]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;t s="Spell" donthide&gt;hi&lt;/&gt;</span></div>
-        <div><span class="lhs">@WaveHand</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand"&gt;&lt;/&gt;</span></div>
-        <div><span class="lhs">@WaveHand!</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" ovlook="true"&gt;&lt;/&gt;</span></div>
-        <div><span class="lhs">@WaveHand:0.25</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" blendtime="0.25"&gt;&lt;/&gt;</span></div>
-        <div><span class="lhs">@-</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;stopanim&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">@WaveHand@</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand"&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">@WaveHand!@</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" ovlook="true"&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">@WaveHand:0.25@</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;anim n="WaveHand" blendtime="0.25"&gt;&lt;/&gt;</span></div>
+        <div><span class="lhs">@-@</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;stopanim&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">$0</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;switchtarget p="0"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">[img:Star]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;img id="Star"&gt;&lt;/&gt;</span></div>
         <div><span class="lhs">[w:Choice]</span> <span class="arr">&rarr;</span> <span class="rhs">&lt;w id="Choice"&gt;&lt;/&gt;</span></div>
@@ -542,7 +542,7 @@
       var suffix = "";
       if (ov) suffix += "!";
       if (btOn && !isNaN(bt)) suffix += ":" + bt;
-      insertAtCursor("@" + n + suffix);
+      insertAtCursor("@" + n + suffix + "@");
     });
     fillButtons(el("tbImages"), V.images, function (n) { insertAtCursor("[img:" + n + "]"); });
     fillButtons(el("tbWidgets"), V.widgets, function (n) { insertAtCursor("[w:" + n + "]"); });
@@ -594,15 +594,13 @@
       }
 
       if (c === "@") {
-        if (src[i + 1] === "-") {
+        if (src.slice(i, i + 3) === "@-@") {
           flush();
           out += "<stopanim></>";
-          // consume an optional trailing identifier and ignore it (names unused)
-          var rest = src.slice(i + 2).match(/^[A-Za-z0-9_]+/);
-          i += 2 + (rest ? rest[0].length : 0);
-          continue;
+          i += 3; continue;
         }
-        var am = src.slice(i + 1).match(/^([A-Za-z0-9_]+)(!?)(?::(\d+(?:\.\d+)?))?/);
+        // Closing @ is required so text can follow the tag with no space.
+        var am = src.slice(i + 1).match(/^([A-Za-z0-9_]+)(!?)(?::(\d+(?:\.\d+)?))?@/);
         if (am) {
           flush();
           var animName = am[1], ovr = am[2] === "!", btStr = am[3];
@@ -700,8 +698,9 @@
         out += "@" + (attrs.n || "");
         if (attrs.ovlook === "true" || attrs.ovlook === "1") out += "!";
         if (attrs.blendtime !== undefined && attrs.blendtime !== "") out += ":" + attrs.blendtime;
+        out += "@";
       } else if (name === "stopanim") {
-        out += "@-";
+        out += "@-@";
       } else if (name === "switchtarget") {
         out += "$" + (attrs.p || "0");
       } else if (name === "img" || name === "image" || name === "i") {
@@ -804,13 +803,11 @@
       }
 
       if (c === "@") {
-        if (src[i + 1] === "-") {
-          var rest = src.slice(i + 2).match(/^[A-Za-z0-9_]+/);
-          var len = 2 + (rest ? rest[0].length : 0);
-          emit('<span class="hl-anim">' + esc(src.slice(i, i + len)) + '</span>');
-          i += len; continue;
+        if (src.slice(i, i + 3) === "@-@") {
+          emit('<span class="hl-anim">@-@</span>');
+          i += 3; continue;
         }
-        var am = src.slice(i + 1).match(/^[A-Za-z0-9_]+!?(?::\d+(?:\.\d+)?)?/);
+        var am = src.slice(i + 1).match(/^[A-Za-z0-9_]+!?(?::\d+(?:\.\d+)?)?@/);
         if (am) {
           emit('<span class="hl-anim">' + esc(src.slice(i, i + 1 + am[0].length)) + '</span>');
           i += 1 + am[0].length; continue;
@@ -979,7 +976,7 @@
   el("toolbar").addEventListener("click", function (ev) {
     var b = ev.target.closest("button[data-act]"); if (!b) return;
     var act = b.getAttribute("data-act");
-    if (act === "stopanim") { insertAtCursor("@-"); }
+    if (act === "stopanim") { insertAtCursor("@-@"); }
     else if (act === "pc") { insertAtCursor("{pc}"); }
     else if (act === "thought") { wrapSelection("(", ")"); }
     else if (act === "switch0") { insertAtCursor("$0"); }
