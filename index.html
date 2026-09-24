@@ -20,6 +20,9 @@
   (a thought)           -> passes through literally (engine handles PRT_THOUGHT)
   \@ \[ \] \{ \\        -> escape, prints the literal character
 
+  Spellcheck: en_US (Typo.js from jsDelivr) on dialogue text only, never on tags.
+  Right-click an underlined word for suggestions or to add it to your dictionary.
+
   Persistence: window.storage inside Claude, localStorage when hosted/embedded,
   in-memory as a last resort. Safe to host (e.g. GitHub Pages) and embed in Notion.
 -->
@@ -214,6 +217,20 @@
   .hl-pc     { color: var(--gold); }
   .hl-thought{ color: var(--ink-faint); font-style: italic; }
   .hl-esc    { color: var(--ink-faint); }
+  .hl-miss   { text-decoration: underline wavy #e0605a; text-decoration-skip-ink: none; text-underline-offset: 3px; }
+
+  .spell-menu {
+    position: fixed; z-index: 50; min-width: 150px; padding: 4px;
+    background: var(--panel); border: 1px solid var(--line-strong); border-radius: 6px;
+    box-shadow: var(--shadow); font-family: "JetBrains Mono", monospace; font-size: 12.5px;
+  }
+  .spell-menu button {
+    display: block; width: 100%; text-align: left; cursor: pointer;
+    font: inherit; color: var(--ink); background: transparent; border: 0; border-radius: 4px; padding: 5px 9px;
+  }
+  .spell-menu button:hover { background: #54b2ab22; }
+  .spell-menu button.add { color: var(--ink-dim); border-top: 1px solid var(--line); border-radius: 0 0 4px 4px; }
+  .spell-menu .none { color: var(--ink-faint); font-style: italic; padding: 5px 9px; }
 
   .toolbar { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
   .tb-row {
@@ -708,14 +725,59 @@
     return safe;
   }
 
+  // ---------- spellcheck ----------
+  // Hunspell en_US via Typo.js. Only plain dialogue text is checked; tags are tokenized out first.
+  var TYPO_CDN = "https://cdn.jsdelivr.net/npm/typo-js@1.3.2/";
+  var speller = null, userDict = {};
+  var typingWordEnd = -1; // caret right after an edit; the word ending there isn't flagged until you move on
+  var WORD_RE = /\p{L}+(?:['’]\p{L}+)*/gu;
+
+  function loadSpeller() {
+    var s = document.createElement("script");
+    s.src = TYPO_CDN + "typo.js";
+    s.onload = function () {
+      Promise.all(["en_US.aff", "en_US.dic"].map(function (f) {
+        return fetch(TYPO_CDN + "dictionaries/en_US/" + f).then(function (r) {
+          if (!r.ok) throw new Error(f); return r.text();
+        });
+      })).then(function (d) {
+        speller = new Typo("en_US", d[0], d[1]);
+        renderHighlight();
+      }).catch(function () { /* offline: no spellcheck */ });
+    };
+    document.head.appendChild(s);
+  }
+  function isMisspelled(word) {
+    var w = word.replace(/’/g, "'");
+    return !userDict[w.toLowerCase()] && !speller.check(w);
+  }
+  // Escapes plain text, wrapping misspelled words. start = index of text within the composer source.
+  function spellMark(text, start) {
+    if (!speller) return esc(text);
+    var out = "", last = 0, m;
+    WORD_RE.lastIndex = 0;
+    while ((m = WORD_RE.exec(text)) !== null) {
+      var s = start + m.index;
+      if (s + m[0].length === typingWordEnd || !isMisspelled(m[0])) continue;
+      out += esc(text.slice(last, m.index)) +
+        '<span class="hl-miss" data-s="' + s + '" data-w="' + esc(m[0]) + '">' + esc(m[0]) + "</span>";
+      last = m.index + m[0].length;
+    }
+    return out + esc(text.slice(last));
+  }
+
   // Syntax-highlight the shorthand source for the composer overlay.
   function highlightShorthand(src) {
-    var out = "", i = 0, n = src.length;
+    var out = "", plain = "", plainStart = 0, i = 0, n = src.length;
+    function emit(html) {
+      if (plain) { out += spellMark(plain, plainStart); plain = ""; }
+      out += html;
+    }
     while (i < n) {
       var c = src[i];
 
       if (c === "\\" && i + 1 < n) {
-        out += '<span class="hl-esc">' + esc(src.slice(i, i + 2)) + '</span>';
+        emit('<span class="hl-esc">' + esc(src.slice(i, i + 2)) + '</span>');
         i += 2; continue;
       }
 
@@ -725,16 +787,16 @@
           var inner = src.slice(i + 1, end);
           var full = src.slice(i, end + 1);
           if (/^(img|image|i|w|widget)\s*:\s*.+$/i.test(inner)) {
-            out += '<span class="hl-asset">' + esc(full) + '</span>';
+            emit('<span class="hl-asset">' + esc(full) + '</span>');
           } else if (inner === "/") {
-            out += '<span class="hl-style">' + esc(full) + '</span>';
+            emit('<span class="hl-style">' + esc(full) + '</span>');
           } else {
             // Style open. Highlight the trailing * (donthide) in gold for distinction.
             var name = inner.trim();
             if (name.slice(-1) === "*") {
-              out += '<span class="hl-style">[' + esc(name.slice(0, -1)) + '<span class="star">*</span>]</span>';
+              emit('<span class="hl-style">[' + esc(name.slice(0, -1)) + '<span class="star">*</span>]</span>');
             } else {
-              out += '<span class="hl-style">' + esc(full) + '</span>';
+              emit('<span class="hl-style">' + esc(full) + '</span>');
             }
           }
           i = end + 1; continue;
@@ -745,12 +807,12 @@
         if (src[i + 1] === "-") {
           var rest = src.slice(i + 2).match(/^[A-Za-z0-9_]+/);
           var len = 2 + (rest ? rest[0].length : 0);
-          out += '<span class="hl-anim">' + esc(src.slice(i, i + len)) + '</span>';
+          emit('<span class="hl-anim">' + esc(src.slice(i, i + len)) + '</span>');
           i += len; continue;
         }
         var am = src.slice(i + 1).match(/^[A-Za-z0-9_]+!?(?::\d+(?:\.\d+)?)?/);
         if (am) {
-          out += '<span class="hl-anim">' + esc(src.slice(i, i + 1 + am[0].length)) + '</span>';
+          emit('<span class="hl-anim">' + esc(src.slice(i, i + 1 + am[0].length)) + '</span>');
           i += 1 + am[0].length; continue;
         }
       }
@@ -758,7 +820,7 @@
       if (c === "$") {
         var sm2 = src.slice(i + 1).match(/^\d+/);
         if (sm2) {
-          out += '<span class="hl-switch">' + esc(src.slice(i, i + 1 + sm2[0].length)) + '</span>';
+          emit('<span class="hl-switch">' + esc(src.slice(i, i + 1 + sm2[0].length)) + '</span>');
           i += 1 + sm2[0].length; continue;
         }
       }
@@ -766,7 +828,7 @@
       if (c === "{") {
         var ce = src.indexOf("}", i + 1);
         if (ce !== -1 && src.slice(i + 1, ce).trim().toLowerCase() === "pc") {
-          out += '<span class="hl-pc">' + esc(src.slice(i, ce + 1)) + '</span>';
+          emit('<span class="hl-pc">' + esc(src.slice(i, ce + 1)) + '</span>');
           i = ce + 1; continue;
         }
       }
@@ -776,15 +838,23 @@
         if (pe !== -1) {
           var content = src.slice(i, pe + 1);
           if (content.indexOf("(", 1) === -1 && content.indexOf("\n") === -1) {
-            out += '<span class="hl-thought">' + esc(content) + '</span>';
+            emit('<span class="hl-thought">' + spellMark(content, i) + '</span>');
             i = pe + 1; continue;
           }
         }
       }
 
-      out += esc(c);
+      // Raw markup (pasted before "From markup") isn't dialogue; keep it out of the spellcheck.
+      if (c === "<") {
+        var mk = src.slice(i).match(/^<(?:\/>|\/?[A-Za-z][^<>\n]*>)/);
+        if (mk) { emit(esc(mk[0])); i += mk[0].length; continue; }
+      }
+
+      if (!plain) plainStart = i;
+      plain += c;
       i++;
     }
+    emit("");
     // Trailing newline padding so caret on the last empty line is in sync with the overlay.
     return out + "\n";
   }
@@ -792,9 +862,12 @@
   // ---------- composer wiring ----------
   var composer = el("composer"), composerHl = el("composerHl"),
       output = el("output"), preview = el("preview"), warns = el("warns");
+  function renderHighlight() {
+    composerHl.innerHTML = highlightShorthand(composer.value);
+  }
   function renderComposer() {
     var src = composer.value;
-    composerHl.innerHTML = highlightShorthand(src);
+    renderHighlight();
     if (!src.trim()) {
       output.className = "out empty"; output.textContent = "\u2014 starts here \u2014";
       preview.className = "preview empty"; preview.textContent = "\u2014 starts here \u2014";
@@ -829,11 +902,79 @@
     renderComposer();
   }
 
-  composer.addEventListener("input", renderComposer);
+  composer.addEventListener("input", function () {
+    typingWordEnd = composer.selectionStart;
+    renderComposer();
+  });
   composer.addEventListener("scroll", function () {
     composerHl.scrollTop = composer.scrollTop;
     composerHl.scrollLeft = composer.scrollLeft;
   });
+  // Once the caret leaves the word being typed, spellcheck it.
+  document.addEventListener("selectionchange", function () {
+    if (typingWordEnd !== -1 && composer.selectionStart !== typingWordEnd) { typingWordEnd = -1; renderHighlight(); }
+  });
+  composer.addEventListener("blur", function () {
+    if (typingWordEnd !== -1) { typingWordEnd = -1; renderHighlight(); }
+  });
+
+  // Right-click a misspelled word for suggestions; anywhere else keeps the browser menu.
+  var spellMenu = null;
+  function closeSpellMenu() { if (spellMenu) { spellMenu.remove(); spellMenu = null; } }
+  function replaceWord(start, word, repl) {
+    var v = composer.value;
+    if (v.substr(start, word.length) !== word) return;
+    composer.value = v.slice(0, start) + repl + v.slice(start + word.length);
+    composer.focus();
+    composer.selectionStart = composer.selectionEnd = start + repl.length;
+    typingWordEnd = -1;
+    renderComposer();
+  }
+  composer.addEventListener("contextmenu", function (ev) {
+    closeSpellMenu();
+    if (!speller) return;
+    var hit = null;
+    composerHl.querySelectorAll(".hl-miss").forEach(function (sp) {
+      Array.prototype.forEach.call(sp.getClientRects(), function (r) {
+        if (ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom) hit = sp;
+      });
+    });
+    if (!hit) return;
+    ev.preventDefault();
+    var start = +hit.getAttribute("data-s"), word = hit.getAttribute("data-w");
+    spellMenu = document.createElement("div");
+    spellMenu.className = "spell-menu";
+    function item(label, cls, fn) {
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = label; if (cls) b.className = cls;
+      b.addEventListener("click", function () { closeSpellMenu(); fn(); });
+      spellMenu.appendChild(b);
+    }
+    var sugg = speller.suggest(word.replace(/’/g, "'"), 5).filter(function (s, k, all) {
+      return all.findIndex(function (t) { return t.toLowerCase() === s.toLowerCase(); }) === k;
+    });
+    sugg.forEach(function (s) { item(s, "", function () { replaceWord(start, word, s); }); });
+    if (!sugg.length) {
+      var none = document.createElement("div");
+      none.className = "none"; none.textContent = "no suggestions";
+      spellMenu.appendChild(none);
+    }
+    item("Add “" + word + "” to dictionary", "add", function () {
+      userDict[word.replace(/’/g, "'").toLowerCase()] = true;
+      save("userDict", Object.keys(userDict));
+      renderHighlight();
+    });
+    document.body.appendChild(spellMenu);
+    var mw = spellMenu.offsetWidth, mh = spellMenu.offsetHeight;
+    spellMenu.style.left = Math.max(4, Math.min(ev.clientX, window.innerWidth - mw - 4)) + "px";
+    spellMenu.style.top = Math.max(4, Math.min(ev.clientY, window.innerHeight - mh - 4)) + "px";
+  });
+  document.addEventListener("mousedown", function (ev) {
+    if (spellMenu && !spellMenu.contains(ev.target)) closeSpellMenu();
+  });
+  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") closeSpellMenu(); });
+  window.addEventListener("scroll", closeSpellMenu, true);
+  window.addEventListener("resize", closeSpellMenu);
 
   el("toolbar").addEventListener("click", function (ev) {
     var b = ev.target.closest("button[data-act]"); if (!b) return;
@@ -941,8 +1082,11 @@
     }
     var csaved = await load("composer"); if (csaved) composer.value = csaved;
     var bsaved = await load("batch"); if (bsaved) batchIn.value = bsaved;
+    var dsaved = await load("userDict");
+    if (dsaved) dsaved.forEach(function (w) { userDict[w] = true; });
 
     readVocabFromUI(); refreshToolbar(); renderComposer(); renderBatch();
+    loadSpeller();
   })();
 })();
 </script>
